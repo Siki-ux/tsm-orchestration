@@ -1,0 +1,265 @@
+# Docker Compose override for integrating water_dp-api with tsm-orchestration
+#
+# This file removes water_dp-api's standalone postgres and connects it to
+# the tsm-orchestration database using the water_dp schema.
+#
+# Usage:
+#   From tsm-orchestration directory:
+#   docker-compose -f docker-compose.yml -f docker-compose-dev.yml -f docker-compose-water-dp.yml up -d
+#
+#   Or set COMPOSE_FILE in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose-dev.yml:docker-compose-water-dp.yml
+#
+# Prerequisites:
+#   1. Deploy water_dp schema: docker-compose exec database psql -U postgres -f /app/src/sql/water_dp/000_deploy_all.sql
+#   2. water_dp-api repo at ../water_dp-api relative to tsm-orchestration
+
+services:
+  # ============================================
+  # water_dp-api - Main API Service
+  # ============================================
+  water-dp-api:
+    build:
+      context: ../water_dp-api
+      dockerfile: Dockerfile
+    container_name: water-dp-api
+    restart: unless-stopped
+    environment:
+      - APP_NAME=Water Data Platform
+      - DEBUG=${WATER_DP_DEBUG:-true}
+      - VERSION=1.0.0
+      - API_PREFIX=/api/v1
+      - ROOT_PATH=/water-api
+      
+      # Use TSM database with water_dp schema
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-postgres}?options=-csearch_path=water_dp,public
+      - DATABASE_POOL_SIZE=10
+      - DATABASE_MAX_OVERFLOW=20
+      
+      # Redis for Celery
+      - REDIS_URL=redis://water-dp-redis:6379
+      - CELERY_BROKER_URL=redis://water-dp-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://water-dp-redis:6379/0
+      
+      # GeoServer (optional, for geo features)
+      - GEOSERVER_URL=http://water-dp-geoserver:8080/geoserver
+      - GEOSERVER_USERNAME=${GEOSERVER_ADMIN_USER:-admin}
+      - GEOSERVER_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      - GEOSERVER_WORKSPACE=${GEOSERVER_WORKSPACE:-water_data}
+      
+      # TimeIO / FROST integration
+      - FROST_URL=http://frost:8080
+      - FROST_SERVER=sta
+      - FROST_VERSION=v1.1
+      - FROST_TIMEOUT=30
+      - TIMEIO_DB_HOST=database
+      - TIMEIO_DB_PORT=5432
+      - TIMEIO_DB_USER=${POSTGRES_USER:-postgres}
+      - TIMEIO_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - TIMEIO_DB_NAME=${POSTGRES_DB:-postgres}
+      
+      # MQTT for thing events
+      - MQTT_BROKER_HOST=mqtt-broker
+      - MQTT_BROKER_PORT=1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-mqtt}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-mqtt}
+      
+      # Keycloak authentication
+      - KEYCLOAK_URL=http://keycloak:8081/keycloak
+      - KEYCLOAK_EXTERNAL_URL=${KEYCLOAK_EXTERNAL_URL:-http://localhost:8081}
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-timeio}
+      - KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USER:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASS:-admin}
+      
+      # Security
+      - SECRET_KEY=${WATER_DP_SECRET_KEY:-change-me-in-production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - FERNET_ENCRYPTION_SECRET=${FERNET_ENCRYPTION_SECRET}
+      
+      # Logging
+      - LOG_LEVEL=${WATER_DP_LOG_LEVEL:-INFO}
+      - SQLALCHEMY_LOG_LEVEL=WARNING
+      - TIME_ZONE=UTC
+      - MAX_TIME_RANGE_DAYS=365
+    ports:
+      - "${WATER_DP_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      database:
+        condition: service_healthy
+      water-dp-redis:
+        condition: service_started
+      mqtt-broker:
+        condition: service_healthy
+      frost:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    volumes:
+      - ../water_dp-api/app:/app/app
+      - ../water_dp-api/alembic:/app/alembic
+      - ../water_dp-api/scripts:/app/scripts
+    networks:
+      - default
+    command: sh scripts/start.sh
+
+  # ============================================
+  # water_dp-api - GeoServer
+  # ============================================
+  water-dp-geoserver:
+    image: kartoza/geoserver:2.22.1
+    container_name: water-dp-geoserver
+    restart: unless-stopped
+    environment:
+      - GEOSERVER_ADMIN_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER:-admin}
+      - GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+      - ALLOW_CORS=true
+      - JAVA_OPTS=-Xms512m -Xmx1024m -DGEOSERVER_CSRF_DISABLED=true
+    ports:
+      - "${WATER_DP_GEOSERVER_PORT:-8079}:8080"
+    volumes:
+      - water_dp_geoserver_data:/opt/geoserver/data_dir
+      - ../water_dp-api/geoserver/conf/server.xml:/usr/local/tomcat/conf/server.xml
+    networks:
+      - default
+    healthcheck:
+      test: "curl --fail http://localhost:8080/geoserver/web/ || exit 1"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+
+  # ============================================
+  # water_dp-api - Celery Worker
+  # ============================================
+  water-dp-worker:
+    build:
+      context: ../water_dp-api
+      dockerfile: Dockerfile
+    container_name: water-dp-worker
+    restart: unless-stopped
+    command: celery -A app.core.celery_app.celery_app worker -B --loglevel=${WATER_DP_LOG_LEVEL:-info} -Q imports,computations,celery
+    environment:
+      # Use TSM database with water_dp schema
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@database:5432/${POSTGRES_DB:-postgres}?options=-csearch_path=water_dp,public
+      
+      # Redis
+      - REDIS_URL=redis://water-dp-redis:6379
+      - CELERY_BROKER_URL=redis://water-dp-redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://water-dp-redis:6379/0
+      
+      # FROST
+      - FROST_URL=http://frost:8080
+      
+      # TimeIO DB access
+      - TIMEIO_DB_HOST=database
+      - TIMEIO_DB_PORT=5432
+      - TIMEIO_DB_USER=${POSTGRES_USER:-postgres}
+      - TIMEIO_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      
+      # MQTT
+      - MQTT_BROKER_HOST=mqtt-broker
+      - MQTT_USERNAME=${MQTT_USERNAME:-mqtt}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-mqtt}
+      
+      # Security
+      - SECRET_KEY=${WATER_DP_SECRET_KEY:-change-me-in-production}
+      - FERNET_ENCRYPTION_SECRET=${FERNET_ENCRYPTION_SECRET}
+      
+      # GeoServer (optional)
+      - GEOSERVER_URL=http://water-dp-geoserver:8080/geoserver
+      - GEOSERVER_USERNAME=${GEOSERVER_ADMIN_USER:-admin}
+      - GEOSERVER_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      
+      # Logging
+      - LOG_LEVEL=${WATER_DP_LOG_LEVEL:-INFO}
+      - SQLALCHEMY_LOG_LEVEL=WARNING
+    depends_on:
+      database:
+        condition: service_healthy
+      water-dp-redis:
+        condition: service_started
+      water-dp-api:
+        condition: service_healthy
+    volumes:
+      - ../water_dp-api/app:/app/app
+      - ../water_dp-api/scripts:/app/scripts
+    networks:
+      - default
+
+  # ============================================
+  # Redis for water_dp-api Celery
+  # ============================================
+  water-dp-redis:
+    image: redis:7-alpine
+    container_name: water-dp-redis
+    restart: unless-stopped
+    volumes:
+      - water_dp_redis_data:/data
+    networks:
+      - default
+
+  geoserver-init:
+    image: python:3.11-slim
+    container_name: geoserver_init
+    restart: "no"
+    command: python /app/seed_geoserver.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GEOSERVER_URL=http://water-dp-geoserver:8080/geoserver
+      - GEOSERVER_USER=${GEOSERVER_ADMIN_USER:-admin}
+      - GEOSERVER_PASSWORD=${GEOSERVER_ADMIN_PASSWORD:-geoserver}
+      # Use TSM database
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-postgres}
+      - DB_USER=${DATABASE_USER:-postgres}
+      - DB_PASSWORD=${DATABASE_PASSWORD:-postgres}
+    depends_on:
+      water-dp-geoserver:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    volumes:
+      - ../water_dp-api/geoserver/scripts/seed_geoserver.py:/app/seed_geoserver.py
+      - ../water_dp-api/geoserver/data:/app/data
+    networks:
+      - default
+
+  # ============================================
+  # water_dp-api - Frontend
+  # ============================================
+  frontend:
+    build:
+      context: ../water_dp-api/frontend
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        - NEXT_PUBLIC_API_URL=http://${PUBLIC_HOSTNAME:-localhost}:8000/api/v1
+        - NEXT_PUBLIC_GEOSERVER_URL=http://${PUBLIC_HOSTNAME:-localhost}/geoserver
+        - NEXT_PUBLIC_NEXTAUTH_URL=http://${PUBLIC_HOSTNAME:-localhost}/portal
+    container_name: water-dp-frontend
+    ports:
+      - "${WATER_DP_FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://${PUBLIC_HOSTNAME:-localhost}:8000/api/v1
+      - NEXT_PUBLIC_GEOSERVER_URL=http://${PUBLIC_HOSTNAME:-localhost}/geoserver
+      - NEXT_PUBLIC_NEXTAUTH_URL=http://${PUBLIC_HOSTNAME:-localhost}/portal
+      - INTERNAL_API_URL=http://water-dp-api:8000/api/v1
+      - AUTH_SECRET=${AUTH_SECRET:-6e2e9c8b3a4f5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-6e2e9c8b3a4f5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r}
+      - NEXTAUTH_URL=http://${PUBLIC_HOSTNAME:-localhost}/portal
+      - AUTH_URL=http://${PUBLIC_HOSTNAME:-localhost}/portal/api/auth
+      - AUTH_TRUST_HOST=true
+    networks:
+      - default
+
+volumes:
+  water_dp_redis_data:
+  water_dp_geoserver_data:

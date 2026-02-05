@@ -1,0 +1,45 @@
+{
+    "version": 7,
+    "uuid": "33333333-3333-3333-3333-333333333333",
+    "name": "TestMqttThing2",
+    "description": "Test thing for verifying DDL fix and local views",
+    "ingest_type": "mqtt",
+    "mqtt_device_type": "chirpstack_generic",
+    "project": {
+        "name": "TestProject2",
+        "uuid": "44444444-4444-4444-4444-444444444444"
+    },
+    "database": {
+        "schema": "test_project2",
+        "username": "test_project2",
+        "password": "gAAAAABpfPtr1yc0OSpLIUoF7LRIfhNAdXetOV8DQI4RSesEwXqnDIkrACcuwxEa4o73SVgQBBnm82qfKrYv_7n-fJKVtPLkUw==",
+        "ro_username": "ro_test_project2",
+        "ro_password": "gAAAAABpfPtrA74Bnfd3bixEgUtHAZjBcQcDKTOWtIZc3T8tYWNLDy5Rhc4NVvO2cnj3M4pNjlP84ayqC1GM1FK9WcF3u3IFMA==",
+        "url": "postgresql://test_project2@database:5432/postgres",
+        "ro_url": "postgresql://ro_test_project2@database:5432/postgres"
+    },
+    "mqtt": {
+        "username": "u_test_mqtt_thing2",
+        "password": "gAAAAABpfPtr88598UxJlxDKYLk5XOViEF0EkBUnc3G4wphFvl5mq_9sUwTrDQ9lFSnJypykTzXwcRsqjKXijJNu6_nmFOVl1Q==",
+        "password_hash": "PBKDF2$sha256$1000$dGVzdHNhbHQ=$a1SPYroIn/pci4c64EKaOMbkAnTA9cjZMQP3Bu0HtjY=",
+        "topic": "mqtt_ingest/u_test_mqtt_thing2/data"
+    },
+    "parsers": {
+        "default": 0,
+        "parsers": [
+            {
+                "type": "csvparser",
+                "name": "TestMqttParser2",
+                "settings": {}
+            }
+        ]
+    },
+    "raw_data_storage": {
+        "bucket_name": "test-mqtt-thing2-bucket",
+        "username": "u_test_bucket2",
+        "password": "gAAAAABpfPtrZ2nJWLJZOPE1AxTEjjCA7lBJKLK5lY4lS_jCz_UBwVlPmzWvcaZ0UzX-VKsmBRp6kKKveQzo2LYyQM9-18qqFQ==",
+        "filename_pattern": "*"
+    },
+    "external_sftp": {},
+    "external_api": {}
+}

@@ -1,0 +1,52 @@
+{
+    "version": 7,
+    "uuid": "55555555-5555-5555-5555-555555555555",
+    "name": "FileIngestThing",
+    "description": "Thing for CSV file ingestion from MinIO bucket",
+    "ingest_type": "sftp",
+    "properties": {
+        "latitude": 51.3397,
+        "longitude": 12.3731,
+        "locationName": "Leipzig"
+    },
+    "project": {
+        "name": "FileIngestProject",
+        "uuid": "66666666-6666-6666-6666-666666666666"
+    },
+    "database": {
+        "schema": "file_ingest_project",
+        "username": "file_ingest_project",
+        "password": "gAAAAABpfPtr1yc0OSpLIUoF7LRIfhNAdXetOV8DQI4RSesEwXqnDIkrACcuwxEa4o73SVgQBBnm82qfKrYv_7n-fJKVtPLkUw==",
+        "ro_username": "ro_file_ingest_project",
+        "ro_password": "gAAAAABpfPtrA74Bnfd3bixEgUtHAZjBcQcDKTOWtIZc3T8tYWNLDy5Rhc4NVvO2cnj3M4pNjlP84ayqC1GM1FK9WcF3u3IFMA==",
+        "url": "postgresql://file_ingest_project@database:5432/postgres",
+        "ro_url": "postgresql://ro_file_ingest_project@database:5432/postgres"
+    },
+    "parsers": {
+        "default": 0,
+        "parsers": [
+            {
+                "type": "csvparser",
+                "name": "CsvParser",
+                "settings": {
+                    "delimiter": ",",
+                    "header": 0,
+                    "timestamp_columns": [
+                        {
+                            "column": 0,
+                            "format": "%Y-%m-%d %H:%M:%S"
+                        }
+                    ]
+                }
+            }
+        ]
+    },
+    "raw_data_storage": {
+        "bucket_name": "file-ingest-thing-bucket",
+        "username": "u_file_ingest_bucket",
+        "password": "gAAAAABpfPtrZ2nJWLJZOPE1AxTEjjCA7lBJKLK5lY4lS_jCz_UBwVlPmzWvcaZ0UzX-VKsmBRp6kKKveQzo2LYyQM9-18qqFQ==",
+        "filename_pattern": "*.csv"
+    },
+    "external_sftp": {},
+    "external_api": {}
+}

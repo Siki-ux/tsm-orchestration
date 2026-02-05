@@ -13,7 +13,7 @@ from timeio.typehints import MqttPayload
 from timeio.databases import Database
 
 logger = logging.getLogger("mqtt-user-setup")
-journal = Journal("System")
+journal = Journal("System", errors="ignore")
 
 
 class CreateMqttUserHandler(AbstractHandler):

@@ -373,6 +373,7 @@ services:
     restart: "${SERVICE_RESTART_POLICY}"
     volumes:
       - "${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/usr/local/tomcat/conf/Catalina/localhost:ro"
+      - ./tomcat/server.xml:/usr/local/tomcat/conf/server.xml:ro
     logging:
       options:
         max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
@@ -769,6 +770,7 @@ services:
       RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
     entrypoint: ["./worker_launcher.sh", "python3", "setup_thing.py", "all"]
     volumes:
+      - ./src:/home/appuser/app/src:ro
       - "${CRON_PERSISTENCE_VOLUME:-crontab}:/tmp/cron"
       - "${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/home/appuser/app/src/frost_context_files:rw"
     logging:

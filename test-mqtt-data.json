@@ -1,0 +1,8 @@
+{
+    "time": "2026-01-30T19:50:00Z",
+    "object": {
+        "temperature": 23.5,
+        "humidity": 65.2,
+        "pressure": 1013.25
+    }
+}

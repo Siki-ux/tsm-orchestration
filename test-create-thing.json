@@ -1,0 +1,45 @@
+{
+    "version": 7,
+    "uuid": "11111111-1111-1111-1111-111111111111",
+    "name": "TestMqttThing",
+    "description": "Test thing for MQTT ingestion verification",
+    "ingest_type": "mqtt",
+    "mqtt_device_type": "chirpstack_generic",
+    "project": {
+        "name": "TestProject",
+        "uuid": "22222222-2222-2222-2222-222222222222"
+    },
+    "database": {
+        "schema": "test_project",
+        "username": "test_project",
+        "password": "gAAAAABpfPtr1yc0OSpLIUoF7LRIfhNAdXetOV8DQI4RSesEwXqnDIkrACcuwxEa4o73SVgQBBnm82qfKrYv_7n-fJKVtPLkUw==",
+        "ro_username": "ro_test_project",
+        "ro_password": "gAAAAABpfPtrA74Bnfd3bixEgUtHAZjBcQcDKTOWtIZc3T8tYWNLDy5Rhc4NVvO2cnj3M4pNjlP84ayqC1GM1FK9WcF3u3IFMA==",
+        "url": "postgresql://test_project@database:5432/postgres",
+        "ro_url": "postgresql://ro_test_project@database:5432/postgres"
+    },
+    "mqtt": {
+        "username": "u_test_mqtt_thing",
+        "password": "gAAAAABpfPtr88598UxJlxDKYLk5XOViEF0EkBUnc3G4wphFvl5mq_9sUwTrDQ9lFSnJypykTzXwcRsqjKXijJNu6_nmFOVl1Q==",
+        "password_hash": "PBKDF2$sha256$1000$dGVzdHNhbHQ=$a1SPYroIn/pci4c64EKaOMbkAnTA9cjZMQP3Bu0HtjY=",
+        "topic": "mqtt_ingest/u_test_mqtt_thing/data"
+    },
+    "parsers": {
+        "default": 0,
+        "parsers": [
+            {
+                "type": "csvparser",
+                "name": "TestMqttParser",
+                "settings": {}
+            }
+        ]
+    },
+    "raw_data_storage": {
+        "bucket_name": "test-mqtt-thing-bucket",
+        "username": "u_test_bucket",
+        "password": "gAAAAABpfPtrZ2nJWLJZOPE1AxTEjjCA7lBJKLK5lY4lS_jCz_UBwVlPmzWvcaZ0UzX-VKsmBRp6kKKveQzo2LYyQM9-18qqFQ==",
+        "filename_pattern": "*"
+    },
+    "external_sftp": {},
+    "external_api": {}
+}

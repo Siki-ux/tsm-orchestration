@@ -1,0 +1,19 @@
+{
+    "default": 0,
+    "parsers": [
+        {
+            "type": "csvparser",
+            "name": "CsvParser",
+            "settings": {
+                "delimiter": ",",
+                "header": 0,
+                "timestamp_columns": [
+                    {
+                        "column": 0,
+                        "format": "%Y-%m-%d %H:%M:%S"
+                    }
+                ]
+            }
+        }
+    ]
+}

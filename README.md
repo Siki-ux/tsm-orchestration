@@ -32,6 +32,24 @@ ports will need a TLS proxy (i.e. nginx) with certificates (i.e.
 issued by
 [DFN PKI](https://www.pki.dfn.de/geant-trusted-certificate-services/)).
 
+### TSM-TEMP: Temporary Changes (Local FROST Views)
+
+> **Note**: This codebase contains temporary changes marked with `TSM-TEMP-DISABLED` and `TSM-TEMP-FIX` comments. These changes disable SMS backend integration and use local database tables for FROST SensorThings views.
+
+**What's changed:**
+- FROST views query local `thing`/`datastream`/`observation` tables instead of `sms_*` tables
+- DDL/DML deployment includes search_path fix for schema isolation
+- Grafana views use simplified local queries
+
+**To find all temporary changes:**
+```bash
+grep -r "TSM-TEMP" src/
+```
+
+**To revert to SMS-based views:**
+1. Set `USE_LOCAL_STA_VIEWS=false` in `.env`
+2. Rebuild workers: `docker-compose up -d --build worker-thing-setup`
+
 ##  2. Run all the services and have fun
 
 - To start the services:
@@ -57,13 +75,193 @@ settings for its infrastructure like database credentials or parser
 properties. When somebody enters or changes settings of a *thing* these
 changes are populated to *action services* by MQTT events.
 
-As long as ZID/TSM doesn't have a graphical end user frontend we have to
-produce events by ourselves. We directly use the MQTT container for
-that:
+### Option A: Using legacy event format
 
 ```bash
 cat thing-event-msg.json | docker-compose exec -T mqtt-broker sh -c "mosquitto_pub -t thing_creation -u \$MQTT_USER -P \$MQTT_PASSWORD -s"
 ```
+
+### Option B: Using frontend_thing_update (recommended)
+
+Create a thing JSON file (e.g., `test-create-thing.json`) with the following structure:
+
+```json
+{
+  "version": 7,
+  "uuid": "11111111-1111-1111-1111-111111111111",
+  "name": "MyMqttThing",
+  "description": "MQTT-enabled thing for sensor data",
+  "ingest_type": "mqtt",
+  "mqtt_device_type": "chirpstack_generic",
+  "project": {
+    "name": "MyProject",
+    "uuid": "22222222-2222-2222-2222-222222222222"
+  },
+  "database": {
+    "schema": "my_project",
+    "username": "my_project",
+    "password": "<fernet_encrypted_password>",
+    "ro_username": "ro_my_project",
+    "ro_password": "<fernet_encrypted_password>",
+    "url": "postgresql://my_project@database:5432/postgres",
+    "ro_url": "postgresql://ro_my_project@database:5432/postgres"
+  },
+  "mqtt": {
+    "username": "u_my_mqtt_thing",
+    "password": "<fernet_encrypted_password>",
+    "password_hash": "<pbkdf2_hash>",
+    "topic": "mqtt_ingest/u_my_mqtt_thing/data"
+  },
+  "parsers": {"default": 0, "parsers": [{"type": "csvparser", "name": "MyParser", "settings": {}}]},
+  "raw_data_storage": {"bucket_name": "my-thing-bucket", "username": "u_my_bucket", "password": "<fernet_encrypted_password>", "filename_pattern": "*"},
+  "external_sftp": {},
+  "external_api": {}
+}
+```
+
+Publish the thing creation message:
+
+```bash
+cat test-create-thing.json | docker-compose exec -T mqtt-broker mosquitto_pub -h localhost -p 1883 -u mqtt -P mqtt -t frontend_thing_update -s -q 2
+```
+
+### Encrypting passwords with Fernet
+
+Passwords must be encrypted using the Fernet key from `.env`:
+
+```bash
+python3 -c "
+from cryptography.fernet import Fernet
+key = 'CKoB---DEFAULT-DUMMY-SECRET---0exKVH0QDLy1B='  # FERNET_ENCRYPTION_SECRET
+f = Fernet(key)
+print(f.encrypt(b'your_password_here').decode())
+"
+```
+
+## 3.1. Publish MQTT sensor data
+
+Once a thing with MQTT ingestion is created, publish data to its topic:
+
+```bash
+# For chirpstack_generic parser format:
+echo '{"time": "2026-01-30T12:00:00Z", "object": {"temperature": 23.5, "humidity": 65.2}}' | \
+  docker-compose exec -T mqtt-broker mosquitto_pub -h localhost -p 1883 -u mqtt -P mqtt \
+  -t "mqtt_ingest/u_my_mqtt_thing/data" -s -q 2
+```
+
+## 3.2. Create a thing for file ingestion
+
+For things that ingest data from files (CSV, etc.) uploaded to MinIO:
+
+```json
+{
+  "version": 7,
+  "uuid": "33333333-3333-3333-3333-333333333333",
+  "name": "MyFileThing",
+  "description": "Thing for CSV file ingestion",
+  "ingest_type": "file",
+  "project": {
+    "name": "MyFileProject",
+    "uuid": "44444444-4444-4444-4444-444444444444"
+  },
+  "database": {
+    "schema": "my_file_project",
+    "username": "my_file_project",
+    "password": "<fernet_encrypted_password>",
+    "ro_username": "ro_my_file_project",
+    "ro_password": "<fernet_encrypted_password>",
+    "url": "postgresql://my_file_project@database:5432/postgres",
+    "ro_url": "postgresql://ro_my_file_project@database:5432/postgres"
+  },
+  "parsers": {
+    "default": 0,
+    "parsers": [{
+      "type": "csvparser",
+      "name": "MyCsvParser",
+      "settings": {
+        "delimiter": ",",
+        "date_format": "%Y-%m-%d %H:%M:%S",
+        "date_position": "TimeField",
+        "skip_rows": 1
+      }
+    }]
+  },
+  "raw_data_storage": {
+    "bucket_name": "my-file-thing-bucket",
+    "username": "u_my_file_bucket",
+    "password": "<fernet_encrypted_password>",
+    "filename_pattern": "*.csv"
+  },
+  "external_sftp": {},
+  "external_api": {}
+}
+```
+
+Upload files to the MinIO bucket at: http://localhost:9001/buckets/my-file-thing-bucket/browse
+
+### 3.3. Understanding the Parser Body
+
+The `parsers` section (stored in [test-parser-config.json](file:///home/siki/dpV2/tsm-orchestration/test-parser-config.json)) defines how the raw data should be interpreted.
+
+For the `csvparser`, the `settings` object must include:
+- `delimiter`: The character separating values (e.g., `,` or `;`).
+- `header`: The 0-based index of the row containing column names (usually `0`).
+- `timestamp_columns`: An **array of objects** specifying which columns form the timestamp.
+  - `column`: The 0-based index of the column.
+  - `format`: The date/time format using standard `strptime` syntax (e.g., `%Y-%m-%d %H:%M:%S`).
+
+> [!NOTE]
+> If your timestamp is split across multiple columns (e.g., Date in col 0 and Time in col 1), you can provide multiple objects in the `timestamp_columns` array. They will be concatenated with a space before parsing.
+
+### 3.4. Unit Metadata for Datastreams (FROST)
+
+The FROST SensorThings API exposes `UNIT_OF_MEASUREMENT` for each datastream with three fields:
+- `name`: Human-readable unit name (e.g., "Celsius")
+- `symbol`: Unit symbol (e.g., "°C")
+- `definition`: URI reference to unit definition (e.g., "http://qudt.org/vocab/unit/DEG_C")
+
+#### Current Behavior
+
+With local views (`USE_LOCAL_STA_VIEWS=true`), unit metadata is extracted from the `datastream.properties` JSON field. If not set, the datastream `position` (column name) is used as the unit name.
+
+#### How to Populate Unit Metadata
+
+**Option 1: Update datastream properties after creation**
+
+After data ingestion creates the datastreams, update their properties:
+
+```bash
+docker-compose exec -T -e PGPASSWORD=postgres database psql -U postgres -d postgres -c "
+UPDATE my_schema.datastream 
+SET properties = jsonb_build_object(
+    'unit_name', 'Celsius',
+    'unit_symbol', '°C',
+    'unit_definition', 'http://qudt.org/vocab/unit/DEG_C'
+)
+WHERE position = 'temperature';
+"
+```
+
+**Option 2: Batch update all datastreams**
+
+```sql
+-- Example: Set units based on column/position name patterns
+UPDATE datastream SET properties = 
+    CASE 
+        WHEN position ILIKE '%temp%' THEN '{"unit_name": "Celsius", "unit_symbol": "°C", "unit_definition": "http://qudt.org/vocab/unit/DEG_C"}'::jsonb
+        WHEN position ILIKE '%humid%' THEN '{"unit_name": "Percent", "unit_symbol": "%", "unit_definition": "http://qudt.org/vocab/unit/PERCENT"}'::jsonb
+        WHEN position ILIKE '%press%' THEN '{"unit_name": "Hectopascal", "unit_symbol": "hPa", "unit_definition": "http://qudt.org/vocab/unit/HectoPA"}'::jsonb
+        ELSE properties
+    END;
+```
+
+#### Future Enhancements
+
+> [!TIP]
+> To fully automate unit metadata:
+> 1. Extend the thing creation payload to include a `datastream_units` mapping
+> 2. Modify `timeio-db-api` to set `datastream.properties` when creating datastreams
+> 3. Or create a post-processing worker that sets units based on naming conventions
 
 The dispatcher action services will create
 - a new minio user and bucket:
@@ -74,11 +272,39 @@ The dispatcher action services will create
   -   and a *thing* entity with (hopefully) all the necessary properties
       in the new `thing` table
 
+
 ## 4. Upload data
 
-Now you can go to the fresh new bucket in the
-[minio console](http://localhost:9001/buckets/thedoors-057d8bba-40b3-11ec-a337-125e5a40a849/browse)
-and upload a `csv` file.
+### Option A: Using MinIO Web Console
+Go to the fresh new bucket in the [MinIO console](http://localhost:9001) and upload a CSV file.
+
+### Option B: Using MinIO mc CLI (API)
+
+You can upload files programmatically using the MinIO `mc` CLI via Docker:
+
+```bash
+# Create and upload a test CSV file
+cat > test-data.csv << 'EOF'
+timestamp,temperature,humidity,pressure
+2026-01-30 12:00:00,22.5,65.3,1013.2
+2026-01-30 12:10:00,22.8,64.9,1013.1
+EOF
+
+# Upload to bucket using mc CLI
+docker run --rm --network=tsm-orchestration_default \
+  -v $(pwd)/test-data.csv:/test-data.csv \
+  --entrypoint sh minio/mc -c \
+  "mc alias set local http://object-storage:9000 minioadmin minioadmin && \
+   mc cp /test-data.csv local/my-bucket-name/test-data.csv"
+
+# List bucket contents
+docker run --rm --network=tsm-orchestration_default \
+  --entrypoint sh minio/mc -c \
+  "mc alias set local http://object-storage:9000 minioadmin minioadmin && \
+   mc ls local/my-bucket-name/"
+```
+
+**Note**: Replace `my-bucket-name` with your thing's bucket name. The file-ingest worker will automatically detect the upload and process the file.
 
 The dispatcher action service called *run-process-new-file-service* gets
 notified by a MQTT event produced by minio and will forward the file

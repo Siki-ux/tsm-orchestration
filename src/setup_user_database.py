@@ -20,6 +20,10 @@ journal = Journal("System", errors="ignore")
 STA_PREFIX = "sta_"
 GRF_PREFIX = "grf_"
 
+# TSM-TEMP-DISABLED: Toggle to use local FROST views instead of SMS-based views
+# Set to False to revert to SMS-based views
+USE_LOCAL_STA_VIEWS = os.environ.get("USE_LOCAL_STA_VIEWS", "true").lower() == "true"
+
 
 class CreateThingInPostgresHandler(AbstractHandler):
     def __init__(self):
@@ -41,16 +45,26 @@ class CreateThingInPostgresHandler(AbstractHandler):
         ro_user = thing.database.ro_username.lower()
         user = thing.database.username.lower()
 
-        # 1. Check, if there is already a database user for this project
-        if not self.user_exists(user):
+        # TSM-TEMP-FIX: Check if core tables exist to allow DDL/DML retry on partial failures
+        # Previously only checked user_exists which would skip DDL on retries if user was created
+        # but tables failed to create. Now we also check if tables exist.
+        user_exists = self.user_exists(user)
+        tables_exist = self.schema_tables_exist(thing) if user_exists else False
+
+        # 1. Create user if not exists
+        if not user_exists:
             logger.debug(f"create user {user}")
             self.create_user(thing)
             logger.debug("create schema")
             self.create_schema(thing)
-            logger.debug("deploy dll")
+
+        # 2. Deploy DDL/DML if tables don't exist (allows retry on partial failure)
+        if not tables_exist:
+            logger.debug("deploy ddl")
             self.deploy_ddl(thing)
             logger.debug("deploy dml")
-            self.deploy_dml()
+            self.deploy_dml(thing)
+        # TSM-TEMP-FIX: End of fix
 
         if not self.user_exists(sta_user := STA_PREFIX + ro_user):
             logger.debug(f"create sta read-only user {sta_user}")
@@ -122,6 +136,28 @@ class CreateThingInPostgresHandler(AbstractHandler):
                         ro_user=ro_user, schema=schema
                     )
                 )
+
+    # TSM-TEMP-FIX: Method to check if core tables exist in schema
+    # This allows DDL/DML to run on retries if tables are missing
+    def schema_tables_exist(self, thing) -> bool:
+        """Check if core tables exist in the project schema."""
+        schema = thing.database.username.lower()
+        required_tables = ['thing', 'observation', 'relation_role']
+        with self.db.connection() as conn:
+            with conn.cursor() as c:
+                c.execute(
+                    """
+                    SELECT COUNT(*) FROM pg_tables
+                    WHERE schemaname = %s AND tablename = ANY(%s)
+                    """,
+                    [schema, required_tables]
+                )
+                count = c.fetchone()[0]
+                tables_exist = count == len(required_tables)
+                if not tables_exist:
+                    logger.debug(f"schema_tables_exist: only {count}/{len(required_tables)} tables found in {schema}")
+                return tables_exist
+    # TSM-TEMP-FIX: End of method
 
     def password_has_changed(self, url, user, password):
         try:
@@ -205,12 +241,16 @@ class CreateThingInPostgresHandler(AbstractHandler):
                     ).format(user=user)
                 )
 
-    def deploy_dml(self):
+    def deploy_dml(self, thing):
+        """Deploy DML (initial data) to the project schema."""
         file = os.path.join(os.path.dirname(__file__), "sql", "postgres-dml.sql")
         with open(file) as fh:
             query = fh.read()
         with self.db.connection() as conn:
             with conn.cursor() as c:
+                # TSM-TEMP-FIX: Set search_path before executing DML
+                user = sql.Identifier(thing.database.username.lower())
+                c.execute(sql.SQL("SET search_path TO {0}").format(user))
                 c.execute(query)
 
     def grant_sta_select(self, thing, user_prefix: str):
@@ -269,29 +309,55 @@ class CreateThingInPostgresHandler(AbstractHandler):
                     ).format(grf_user=grf_user, schema=schema)
                 )
 
-                c.execute(
-                    sql.SQL(
-                        "GRANT SELECT ON TABLE thing, datastream, observation, "
-                        'journal, datastream_properties, "LOCATIONS", "THINGS", '
-                        '"THINGS_LOCATIONS", "SENSORS", "OBS_PROPERTIES", "DATASTREAMS", '
-                        '"OBSERVATIONS" TO {grf_user}'
-                    ).format(grf_user=grf_user, schema=schema)
-                )
+                # TSM-TEMP-DISABLED: Use different table list for local vs SMS views
+                if USE_LOCAL_STA_VIEWS:
+                    c.execute(
+                        sql.SQL(
+                            "GRANT SELECT ON TABLE thing, datastream, observation, "
+                            'journal, datastream_properties, "THINGS", "DATASTREAMS", '
+                            '"OBSERVATIONS" TO {grf_user}'
+                        ).format(grf_user=grf_user, schema=schema)
+                    )
+                else:
+                    c.execute(
+                        sql.SQL(
+                            "GRANT SELECT ON TABLE thing, datastream, observation, "
+                            'journal, datastream_properties, "LOCATIONS", "THINGS", '
+                            '"THINGS_LOCATIONS", "SENSORS", "OBS_PROPERTIES", "DATASTREAMS", '
+                            '"OBSERVATIONS" TO {grf_user}'
+                        ).format(grf_user=grf_user, schema=schema)
+                    )
+                # TSM-TEMP-DISABLED: End of toggle
+
 
     def create_frost_views(self, thing):
-        base_path = os.path.join(os.path.dirname(__file__), "sql", "sta_views")
-        files = [
-            os.path.join(base_path, "schema_context.sql"),
-            os.path.join(base_path, "thing.sql"),
-            os.path.join(base_path, "location.sql"),
-            os.path.join(base_path, "sensor.sql"),
-            os.path.join(base_path, "observed_property.sql"),
-            os.path.join(base_path, "datastream.sql"),
-            os.path.join(base_path, "helper_views", "foi_ts_action_type_coord.sql"),
-            os.path.join(base_path, "helper_views", "obs_ts_action_type_coord.sql"),
-            os.path.join(base_path, "feature.sql"),
-            os.path.join(base_path, "observation.sql"),
-        ]
+        # TSM-TEMP-DISABLED: Use local views if toggle is enabled
+        if USE_LOCAL_STA_VIEWS:
+            logger.info("Using local FROST views (SMS disabled)")
+            base_path = os.path.join(os.path.dirname(__file__), "sql", "sta_views_local")
+            files = [
+                os.path.join(base_path, "thing.sql"),
+                os.path.join(base_path, "datastream.sql"),
+                os.path.join(base_path, "observation.sql"),
+                os.path.join(base_path, "location.sql"),
+                os.path.join(base_path, "thing_locations.sql"),
+            ]
+        else:
+            # TSM-TEMP-DISABLED: Original SMS-based views (currently disabled)
+            base_path = os.path.join(os.path.dirname(__file__), "sql", "sta_views")
+            files = [
+                os.path.join(base_path, "schema_context.sql"),
+                os.path.join(base_path, "thing.sql"),
+                os.path.join(base_path, "location.sql"),
+                os.path.join(base_path, "sensor.sql"),
+                os.path.join(base_path, "observed_property.sql"),
+                os.path.join(base_path, "datastream.sql"),
+                os.path.join(base_path, "helper_views", "foi_ts_action_type_coord.sql"),
+                os.path.join(base_path, "helper_views", "obs_ts_action_type_coord.sql"),
+                os.path.join(base_path, "feature.sql"),
+                os.path.join(base_path, "observation.sql"),
+            ]
+        # TSM-TEMP-DISABLED: End of toggle
 
         schema = thing.database.schema.lower()
         user = sql.Identifier(thing.database.username.lower())
@@ -318,12 +384,23 @@ class CreateThingInPostgresHandler(AbstractHandler):
                     c.execute(view)
 
     def create_grafana_views(self, thing):
-        file = os.path.join(
-            os.path.dirname(__file__),
-            "sql",
-            "grafana_views",
-            "datastream_properties.sql",
-        )
+        # TSM-TEMP-DISABLED: Use local Grafana views if toggle is enabled
+        if USE_LOCAL_STA_VIEWS:
+            logger.info("Using local Grafana views (SMS disabled)")
+            file = os.path.join(
+                os.path.dirname(__file__),
+                "sql",
+                "grafana_views_local",
+                "datastream_properties.sql",
+            )
+        else:
+            file = os.path.join(
+                os.path.dirname(__file__),
+                "sql",
+                "grafana_views",
+                "datastream_properties.sql",
+            )
+        # TSM-TEMP-DISABLED: End of toggle
         with open(file) as fh:
             view = fh.read()
         with self.db.connection() as conn:
@@ -331,6 +408,7 @@ class CreateThingInPostgresHandler(AbstractHandler):
                 user = sql.Identifier(thing.database.username.lower())
                 c.execute(sql.SQL("SET search_path TO {0}").format(user))
                 c.execute(view)
+
 
     def upsert_thing(self, thing) -> bool:
         """Returns True for insert and False for update"""
