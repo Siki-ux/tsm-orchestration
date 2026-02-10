@@ -1,45 +1,183 @@
-# Get started with ZID/TSM
+# TSM Orchestration
 
-The orchestration repository is the place where all the little [ZID/TSM
-components](https://git.ufz.de/rdm-software/timeseries-management) are
-combined to a running system. This is achieved by putting the docker
-images of the ZID/TSM components together in a
-[docker compose file](docker-compose.yml) so you can start them with a
-single command and without deeper knowledge of every single part of it.
+Time Series Management (TSM) orchestration combines all TSM components into a running system for ingesting, storing, and serving environmental sensor data.
 
-Used [ZID/TSM
-components](https://git.ufz.de/rdm-software/timeseries-management) in
-that repo:
+## 🏗️ Architecture Overview
 
-- [tsm-orchestration](https://git.ufz.de/rdm-software/timeseries-management/tsm-orchestration)
-- [tsm-extractor](https://git.ufz.de/rdm-software/timeseries-management/tsm-extractor)
-- [tsm-dispatcher](https://git.ufz.de/rdm-software/timeseries-management/tsm-dispatcher)
-- [TSM Basic Demo Scheduler](https://git.ufz.de/rdm-software/timeseries-management/tsm-basic-demo-scheduler)
+```mermaid
+graph TB
+    subgraph "Data Ingestion"
+        MQTT[MQTT Broker :1883]
+        MinIO[MinIO Object Storage :9001]
+        ExtAPI[External APIs]
+        SFTP[SFTP/FTP Uploads]
+    end
 
-## 1. Create environment/config file from example:
+    subgraph "Processing Workers"
+        ConfigUpdater[configdb-updater]
+        ThingSetup[worker-thing-setup]
+        FileIngest[worker-file-ingest]
+        MQTTIngest[worker-mqtt-ingest]
+    end
+
+    subgraph "Database Layer"
+        DB[(PostgreSQL<br/>+ TimescaleDB :5432)]
+    end
+
+    subgraph "APIs & Frontends"
+        FROST[FROST Server<br/>SensorThings API]
+        TSMDL[TSMDL API]
+        DBApi[timeio-db-api]
+        ThingMgmt[thing-management-api]
+        ThingMgmtFE[thing-management-frontend]
+        Legacy[Legacy Frontend<br/>Django]
+        Grafana[Grafana :3000]
+    end
+
+    subgraph "Auth & Proxy"
+        Keycloak[Keycloak :8081]
+        Proxy[Nginx Proxy :80]
+    end
+
+    MQTT --> ConfigUpdater
+    MQTT --> MQTTIngest
+    MinIO --> FileIngest
+    ExtAPI --> FileIngest
+    SFTP --> MinIO
+
+    ConfigUpdater --> MQTT
+    ConfigUpdater --> DB
+    ThingSetup --> DB
+    ThingSetup --> MinIO
+    ThingSetup --> Grafana
+    FileIngest --> DB
+    MQTTIngest --> DB
+
+    DB --> FROST
+    DB --> TSMDL
+    DB --> DBApi
+    DB --> Grafana
+
+    Proxy --> FROST
+    Proxy --> ThingMgmtFE
+    Proxy --> Legacy
+    Proxy --> Grafana
+    Proxy --> MinIO
+
+    ThingMgmt --> MQTT
+    ThingMgmt --> Keycloak
+```
+
+---
+
+## 🔄 Data Flow
+
+### Thing Creation Flow
+
+```mermaid
+sequenceDiagram
+    participant User as User/Frontend
+    participant API as thing-management-api
+    participant MQTT as MQTT Broker
+    participant Config as configdb-updater
+    participant Setup as worker-thing-setup
+    participant DB as Database
+    participant MinIO as MinIO
+
+    User->>API: Create Thing (JSON)
+    API->>MQTT: Publish to frontend_thing_update
+    MQTT->>Config: Receive thing event
+    Config->>DB: Update configdb tables
+    Config->>MQTT: Publish to configdb_update
+    MQTT->>Setup: Receive configdb event
+    Setup->>DB: Create schema & tables
+    Setup->>MinIO: Create bucket & user
+    Setup->>DB: Create FROST context
+```
+
+### File Ingestion Flow
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant MinIO as MinIO
+    participant MQTT as MQTT Broker
+    participant Worker as worker-file-ingest
+    participant DB as Database
+    participant FROST as FROST API
+
+    User->>MinIO: Upload CSV file
+    MinIO->>MQTT: object_storage_notification
+    MQTT->>Worker: Receive file event
+    Worker->>MinIO: Download file
+    Worker->>Worker: Parse with configured parser
+    Worker->>DB: Insert observations
+    User->>FROST: GET /Datastreams/.../Observations
+    FROST->>DB: Query observations
+    FROST-->>User: Return time series data
+```
+
+---
+
+## 📦 Component Reference
+
+| Service | Purpose | Port |
+|---------|---------|------|
+| `database` | PostgreSQL + TimescaleDB | 5432 |
+| `mqtt-broker` | Mosquitto MQTT message bus | 1883 |
+| `object-storage` | MinIO file storage | 9000/9001 |
+| `frost` | FROST SensorThings API | 8080 |
+| `keycloak` | Identity provider (OIDC) | 8081 |
+| `visualization` | Grafana dashboards | 3000 |
+| `thing-management-api` | REST API for thing management | 8002 |
+| `thing-management-frontend` | React frontend for things | - |
+| `frontend` | Legacy Django admin | 8000 |
+| `worker-configdb-updater` | Syncs configdb from MQTT events | - |
+| `worker-thing-setup` | Provisions infrastructure for things | - |
+| `worker-file-ingest` | Parses uploaded files | - |
+| `worker-mqtt-ingest` | Processes MQTT sensor data | - |
+| `proxy` | Nginx reverse proxy | 80/443 |
+
+---
+
+## 📊 Database Schema
+
+### Core Tables (public schema)
+
+| Table | Purpose |
+|-------|---------|
+| `thing_config` | Thing configuration from MQTT events |
+| `schema_thing_mapping` | Maps schemas to thing UUIDs |
+| `mqtt_auth` | MQTT user authentication |
+| `parser_type` | Available parser types |
+| `device_type` | Supported device types |
+
+### Per-Thing Schema (`{project_schema}`)
+
+| Table | Purpose |
+|-------|---------|
+| `thing` | Thing metadata |
+| `datastream` | Data channels (one per measured property) |
+| `observation` | Time series data (hypertable) |
+| `location` | Geographic locations |
+
+### FROST Views (`src/sql/sta_views_local/`)
+
+SQL views that expose local tables as SensorThings entities for FROST.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Create environment file
 
 ```bash
-cp .env.example .env 
+cp .env.example .env
 ```
-The settings from the example are ok for local testing and development.
-Postgres, Minio and MQTT services are exposed on localhost, so you can
-access them with clients from your machine.
 
-When using this in (semi-) production (e.g. on a server) some settings,
-especially the passwords should be changed! Also keep in mind, that you
-will need encryption when exposing the services: For example, minio HTTP
-ports will need a TLS proxy (i.e. nginx) with certificates (i.e.
-issued by
-[DFN PKI](https://www.pki.dfn.de/geant-trusted-certificate-services/)).
+### TSM-TEMP: Local FROST Views
 
-### TSM-TEMP: Temporary Changes (Local FROST Views)
-
-> **Note**: This codebase contains temporary changes marked with `TSM-TEMP-DISABLED` and `TSM-TEMP-FIX` comments. These changes disable SMS backend integration and use local database tables for FROST SensorThings views.
-
-**What's changed:**
-- FROST views query local `thing`/`datastream`/`observation` tables instead of `sms_*` tables
-- DDL/DML deployment includes search_path fix for schema isolation
-- Grafana views use simplified local queries
+> **Note**: This deployment uses local database tables instead of the SMS backend. Changes are marked with `TSM-TEMP-DISABLED` and `TSM-TEMP-FIX` comments.
 
 **To find all temporary changes:**
 ```bash
@@ -48,9 +186,9 @@ grep -r "TSM-TEMP" src/
 
 **To revert to SMS-based views:**
 1. Set `USE_LOCAL_STA_VIEWS=false` in `.env`
-2. Rebuild workers: `docker-compose up -d --build worker-thing-setup`
+2. Rebuild: `docker-compose up -d --build worker-thing-setup`
 
-##  2. Run all the services and have fun
+### 2. Run all services
 
 - To start the services:
   - execute `./up.sh`
