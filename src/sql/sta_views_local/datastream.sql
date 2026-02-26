@@ -9,8 +9,12 @@ DROP VIEW IF EXISTS "DATASTREAMS" CASCADE;
 CREATE VIEW "DATASTREAMS" AS
 SELECT
     d.id AS "ID",
-    d.name AS "NAME",
-    d.name AS "DESCRIPTION",
+    COALESCE(
+        (CASE 
+            WHEN jsonb_typeof(d.properties) = 'array' AND jsonb_array_length(d.properties) > 1 THEN d.properties->1->>'label'
+            ELSE d.properties->>'label'
+        END), d.name) AS "NAME",
+    COALESCE(d.description, d.name) AS "DESCRIPTION",
     'http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement' AS "OBSERVATION_TYPE",
     CASE 
         WHEN jsonb_typeof(d.properties) = 'object' THEN d.properties

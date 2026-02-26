@@ -1,0 +1,5 @@
+version: '3.7'
+services:
+  worker-configdb-updater:
+    volumes:
+      - ./src/timeio:/home/appuser/app/timeio

@@ -33,9 +33,11 @@ class ParseMqttDataHandler(AbstractHandler):
         )
 
         self.configdb_dsn = get_envvar("CONFIGDB_DSN")
+        auth_token = get_envvar("DB_API_AUTH_TOKEN")
         self.dbapi = DBapi(
-            get_envvar("DB_API_BASE_URL"), get_envvar("DB_API_AUTH_TOKEN")
+            get_envvar("DB_API_BASE_URL"), auth_token
         )
+        logger.info(f"DB_API_AUTH_TOKEN: {auth_token[:4]}***")
         self.pub_topic = get_envvar("TOPIC_DATA_PARSED")
 
     def act(self, content: typing.Any, message: MQTTMessage):
@@ -47,7 +49,9 @@ class ParseMqttDataHandler(AbstractHandler):
         thing_uuid = thing.uuid
 
         logger.info(f"get parser")
-        parser: MqttParser = get_parser(thing.mqtt.mqtt_device_type.name, None)
+        parser: MqttParser = get_parser(
+            thing.mqtt.mqtt_device_type.name, thing.mqtt.mqtt_device_type.properties
+        )
 
         logger.info(f"parsing rawdata")
         try:

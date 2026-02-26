@@ -341,6 +341,10 @@ class CreateThingInPostgresHandler(AbstractHandler):
                 os.path.join(base_path, "observation.sql"),
                 os.path.join(base_path, "location.sql"),
                 os.path.join(base_path, "thing_locations.sql"),
+                os.path.join(base_path, "sensor.sql"),
+                os.path.join(base_path, "observed_property.sql"),
+                os.path.join(base_path, "feature.sql"),
+                os.path.join(base_path, "historical_location.sql"),
             ]
         else:
             # TSM-TEMP-DISABLED: Original SMS-based views (currently disabled)

@@ -25,26 +25,6 @@ services:
     volumes:
       - ./src:/home/appuser/app/src
 
-  worker-sync-extsftp:
-    volumes:
-      - ./src:/home/appuser/app/src
-
-  worker-sync-extapis:
-    volumes:
-      - ./src:/home/appuser/app/src
-
-  worker-sync-sms:
-    volumes:
-      - ./src:/home/appuser/app/src
-
-  frontend:
-    environment:
-      - "DJANGO_HELMHOLTZ_CLIENT_ID=${THING_MANAGEMENT_DJANGO_HELMHOLTZ_CLIENT_ID:-timeIO-client}"
-      - "DJANGO_HELMHOLTZ_CLIENT_SECRET=${THING_MANAGEMENT_DJANGO_HELMHOLTZ_CLIENT_SECRET:-pUolEnz1Ve5djx9oUpw1KBgB0YgIlUOQ}"
-      - "DJANGO_HELMHOLTZ_AAI_CONF_URL=${THING_MANAGEMENT_DJANGO_HELMHOLTZ_AAI_CONF_URL:-http://keycloak:8081/keycloak/realms/demo/.well-known/openid-configuration}"
-    volumes:
-      - "${DEV_FRONTEND_DIR:-../tsm-frontend}:/home/appuser/app"
-
   visualization:
     environment:
       - "GF_AUTH_GENERIC_OAUTH_SCOPES=openid email profile eduperson_principal_name"
@@ -66,32 +46,6 @@ services:
     ports:
       - "127.0.0.1:8001:8001"
 
-  thing-management-frontend:
-    image: registry.hzdr.de/ufz-tsm/thing-management/frontend/quasar:latest
-    working_dir: /app
-    user: "node"
-    tty: true
-    command: ./start.sh
-    environment:
-      APP_PORT: 80
-      NODE_ENV: development
-      APP_DEV_PATH: /thing-management
-    volumes:
-      - "${DEV_TMM_FE_DIR:-../thing-management/frontend}/app:/app"
-
-  thing-management-api:
-    command: uvicorn main:app --reload --host 0.0.0.0 --port 8002
-    restart: "no"
-    volumes:
-      - "${DEV_TMM_BE_DIR:-../thing-management/backend}/app:/app"
-
-
   proxy:
     volumes:
       - "./nginx/tsm.dev.conf:/etc/nginx/conf.d/default.conf:ro"
-
-volumes:
-  keycloak-data:
-  npm:
-  node_modules:
-

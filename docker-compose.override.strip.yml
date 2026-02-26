@@ -1,0 +1,87 @@
+# ==============================================================================
+# TSM Orchestration — Stripped Override
+# ==============================================================================
+# Disables services not needed for the water_dp project.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.override.strip.yml \
+#     -f docker-compose-water-dp.yml up -d
+#
+#   Or set COMPOSE_FILE in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.override.strip.yml:docker-compose-water-dp.yml
+# ==============================================================================
+
+services:
+
+  # ============================================
+  # DISABLED: Thing Management Layer
+  # Replaced by water_dp-api + water-dp-frontend
+  # ============================================
+  thing-management-frontend:
+    deploy:
+      replicas: 0
+
+  thing-management-api:
+    deploy:
+      replicas: 0
+
+  flyway-thing-management:
+    deploy:
+      replicas: 0
+    depends_on:
+      database:
+        condition: service_healthy
+        required: false
+      flyway:
+        condition: service_completed_successfully
+        required: false
+
+  frontend:
+    deploy:
+      replicas: 0
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+        required: false
+      worker-configdb-updater:
+        condition: service_started
+        required: false
+
+  # ============================================
+  # DISABLED: Research / UFZ-Specific Services
+  # ============================================
+  tsmdl:
+    deploy:
+      replicas: 0
+
+  worker-sync-extapis:
+    deploy:
+      replicas: 0
+
+  worker-sync-extsftp:
+    deploy:
+      replicas: 0
+
+  worker-sync-sms:
+    deploy:
+      replicas: 0
+
+  monitoring:
+    deploy:
+      replicas: 0
+
+  # ============================================
+  # MODIFIED: Proxy — remove depends_on for disabled services
+  # ============================================
+  proxy:
+    depends_on:
+      visualization:
+        condition: service_started
+      object-storage:
+        condition: service_started
+      frost:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully

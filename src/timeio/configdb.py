@@ -134,7 +134,11 @@ def fetch_device_type_id(conn: Connection, name: str) -> int:
         [name],
     ).fetchone()
     if r is None:
-        raise ValueError(f"No entry for mqtt_device_type {name!r}")
+        logger.info(f"Device type '{name}' not found. Auto-creating.")
+        r = conn.execute(
+            "INSERT INTO config_db.mqtt_device_type (name) VALUES (%s) RETURNING id",
+            [name],
+        ).fetchone()
     return r[0]
 
 
@@ -284,6 +288,7 @@ def upsert_table_file_parser(conn: Connection, values: dict, fp_id: int | None) 
         columns=["file_parser_type_id", "name", "params", "uuid"],
         values=[type_id, v.pop("name"), v.pop("settings"), v.pop("uuid")],
         id=fp_id,
+        on_conflict_column="uuid",
     )
     maybe_inform_unused_keys(v)
     return id_

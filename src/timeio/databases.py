@@ -59,13 +59,18 @@ class DBapi:
 
     def upsert_observations(self, thing_uuid: str, observations: list[dict[str, Any]]):
         url = f"{self.base_url}/observations/upsert/{thing_uuid}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.auth_token}",
+        }
+        # Debug logging
+        logging.info(f"POST to {url}")
+        logging.info(f"Headers: Content-Type={headers['Content-Type']}, Authorization={headers['Authorization'][:15]}***")
+
         response = requests.post(
             url,
             json={"observations": observations},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.auth_token}",
-            },
+            headers=headers,
         )
         if response.status_code not in (200, 201):
             raise RuntimeError(

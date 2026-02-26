@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Start all TSM services
+# Start all TSM services (stripped for water_dp)
 # Usage:
-#   ./up.sh           - Start base TSM services only
-#   ./up.sh --all     - Start TSM + water_dp-api services
-#   ./up.sh --water   - Start TSM + water_dp-api services
+#   ./up.sh           - Start TSM + water_dp services (default)
+#   ./up.sh --base    - Start base TSM services only (no water_dp)
+#   ./up.sh --full    - Start ALL TSM services (no strip, no water_dp)
 
 DIR_SCRIPT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-if [[ "$1" == "--all" ]] || [[ "$1" == "--water" ]]; then
-    echo "Starting TSM + water_dp-api services..."
-    docker compose -f "${DIR_SCRIPT}/docker-compose.yml" -f "${DIR_SCRIPT}/docker-compose-water-dp.yml" up -d
+COMPOSE_BASE="-f ${DIR_SCRIPT}/docker-compose.yml"
+COMPOSE_STRIP="-f ${DIR_SCRIPT}/docker-compose.override.strip.yml"
+COMPOSE_WATER="-f ${DIR_SCRIPT}/docker-compose-water-dp.yml"
+
+if [[ "$1" == "--full" ]]; then
+    echo "Starting ALL TSM services (unstripped, no water_dp)..."
+    docker compose ${COMPOSE_BASE} up -d
+elif [[ "$1" == "--base" ]]; then
+    echo "Starting stripped TSM services only (no water_dp)..."
+    docker compose ${COMPOSE_BASE} ${COMPOSE_STRIP} up -d
 else
-    echo "Starting base TSM services..."
-    docker compose -f "${DIR_SCRIPT}/docker-compose.yml" up -d
+    echo "Starting TSM + water_dp services..."
+    docker compose ${COMPOSE_BASE} ${COMPOSE_STRIP} ${COMPOSE_WATER} up -d
 fi

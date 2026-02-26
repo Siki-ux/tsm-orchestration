@@ -393,6 +393,7 @@ class MQTTDeviceType(Base, FromNameMixin):
     _table_name = "mqtt_device_type"
     id: int = _prop(lambda self: self._attrs["id"])
     name: str = _prop(lambda self: self._attrs["name"])
+    properties: JsonObjectT | None = _prop(lambda self: self._attrs.get("properties"))
 
 
 class ExtAPIType(Base, FromNameMixin):

@@ -62,6 +62,23 @@ def get_parser(
         instance = klass(settings, norm_kws)
 
     else:
-        instance = klass()
+        # Fallback: Dynamic loading for MQTT devices
+        # If settings contain script info, try to load dynamically
+        if settings and settings.get("script_bucket") and settings.get("script_path"):
+            try:
+                from timeio.parser.dynamic_loader import load_dynamic_parser
+                klass = load_dynamic_parser(
+                    settings["script_bucket"], settings["script_path"]
+                )
+                instance = klass()
+                return instance
+            except ImportError as e:
+                # If dynamic loading fails, re-raise as NotImplemented or log?
+                # For now, let it bubble up or wrap it.
+                # raising NotImplementedError to match signature expectation if not found
+                raise NotImplementedError(f"Dynamic parser loading failed: {e}")
+
+        # If we are here, we really don't know the parser
+        raise NotImplementedError(f"parser {parser_type!r} not known")
 
     return instance
