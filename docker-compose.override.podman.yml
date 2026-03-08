@@ -1,0 +1,27 @@
+services:
+  flyway:
+    userns_mode: keep-id
+  proxy:
+    userns_mode: keep-id
+  mqtt-broker:
+    userns_mode: keep-id
+  visualization:
+    userns_mode: keep-id
+  frost:
+    userns_mode: keep-id
+  keycloak:
+    userns_mode: keep-id
+  worker-configdb-updater:
+    userns_mode: keep-id
+  worker-thing-setup:
+    userns_mode: keep-id
+  worker-file-ingest:
+    userns_mode: keep-id
+  worker-monitor-mqtt:
+    userns_mode: keep-id
+  worker-grafana-user-orgs:
+    userns_mode: keep-id
+  worker-mqtt-ingest:
+    userns_mode: keep-id
+  worker-run-qaqc:
+    userns_mode: keep-id

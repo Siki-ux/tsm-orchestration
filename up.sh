@@ -7,17 +7,41 @@
 
 DIR_SCRIPT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+PODMAN_MODE=false
+TARGET_MODE=""
+
+for arg in "$@"; do
+    if [[ "$arg" == "--podman" ]]; then
+        PODMAN_MODE=true
+    elif [[ "$arg" == "--full" || "$arg" == "--base" ]]; then
+        TARGET_MODE="$arg"
+    fi
+done
+
+COMPOSE_CMD="docker compose"
 COMPOSE_BASE="-f ${DIR_SCRIPT}/docker-compose.yml"
-COMPOSE_STRIP="-f ${DIR_SCRIPT}/docker-compose.override.strip.yml"
+
+if [[ "$PODMAN_MODE" == "true" ]]; then
+    echo "======================================================================================"
+    echo " WARNING: Running in Podman mode."
+    echo " If 'proxy' fails to start, ensure you have enabled unprivileged ports on your host:"
+    echo "   sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80"
+    echo "======================================================================================"
+    COMPOSE_CMD="podman compose"
+    export UID=$(id -u)
+    export GID=$(id -g)
+    COMPOSE_BASE="-f ${DIR_SCRIPT}/docker-compose.yml -f ${DIR_SCRIPT}/docker-compose.override.podman.yml"
+fi
+
 COMPOSE_WATER="-f ${DIR_SCRIPT}/docker-compose-water-dp.yml"
 
-if [[ "$1" == "--full" ]]; then
+if [[ "$TARGET_MODE" == "--full" ]]; then
     echo "Starting ALL TSM services (unstripped, no water_dp)..."
-    docker compose ${COMPOSE_BASE} up -d
-elif [[ "$1" == "--base" ]]; then
+    ${COMPOSE_CMD} ${COMPOSE_BASE} up -d
+elif [[ "$TARGET_MODE" == "--base" ]]; then
     echo "Starting stripped TSM services only (no water_dp)..."
-    docker compose ${COMPOSE_BASE} ${COMPOSE_STRIP} up -d
+    ${COMPOSE_CMD} ${COMPOSE_BASE} up -d
 else
     echo "Starting TSM + water_dp services..."
-    docker compose ${COMPOSE_BASE} ${COMPOSE_STRIP} ${COMPOSE_WATER} up -d
+    ${COMPOSE_CMD} ${COMPOSE_BASE} ${COMPOSE_WATER} up -d
 fi
