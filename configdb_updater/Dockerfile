@@ -18,9 +18,20 @@ LABEL maintainer="The ZID Team" \
 
 FROM base as build
 
+ARG SKIP_SSL_VERIFY=false
+
 COPY src/requirements.txt /tmp/requirements.txt
 RUN python -m venv /opt/venv
-RUN /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+RUN if [ "$SKIP_SSL_VERIFY" = "true" ]; then \
+      echo 'charset-normalizer!=3.4.7' > /tmp/constraints.txt && \
+      /opt/venv/bin/pip install --no-cache-dir \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+        --trusted-host codebase.helmholtz.cloud --trusted-host jfrog-pkg-proxy.it.att.com \
+        -c /tmp/constraints.txt \
+        -r /tmp/requirements.txt; \
+    else \
+      /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt; \
+    fi
 
 
 FROM base AS dist

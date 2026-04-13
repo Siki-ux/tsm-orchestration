@@ -3,6 +3,7 @@ ARG BASE_IMAGE_TAG=latest
 
 FROM ${BASE_IMAGE_REGISTRY}:${BASE_IMAGE_TAG}
 ARG UID=1000
+ARG SKIP_SSL_VERIFY=false
 
 ARG BUILD_DATE
 ARG VCS_REF
@@ -14,7 +15,11 @@ LABEL maintainer="The ZID Team" \
     org.opencontainers.image.revision=$VCS_REF \
     org.opencontainers.image.created=$BUILD_DATE
 
-RUN apk add  --no-cache \
+RUN if [ "$SKIP_SSL_VERIFY" = "true" ]; then \
+      echo "http://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories && \
+      echo "http://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache \
     openssh-keygen \
     openssl \
     tree

@@ -64,12 +64,14 @@ class DBapi:
             "Authorization": f"Bearer {self.auth_token}",
         }
         # Debug logging
+        payload = {"observations": observations}
         logging.info(f"POST to {url}")
+        logging.info(f"Payload: {payload}")
         logging.info(f"Headers: Content-Type={headers['Content-Type']}, Authorization={headers['Authorization'][:15]}***")
 
         response = requests.post(
             url,
-            json={"observations": observations},
+            json=payload,
             headers=headers,
         )
         if response.status_code not in (200, 201):

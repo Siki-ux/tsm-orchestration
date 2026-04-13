@@ -84,6 +84,13 @@ def get_nm_timerange(thing):
     )
 
 
+def get_default_timerange(thing):
+    """Default time range: last 24 hours. Used for custom API types."""
+    now = datetime.now()
+    yesterday = now - timedelta(days=1)
+    return yesterday.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%Y-%m-%d %H:%M:%S")
+
+
 TIMERANGE_MAPPING = {
     "tsystems": get_tsystems_timerange,
     "bosch": get_bosch_timerange,
@@ -105,7 +112,8 @@ def sync_thing(thing_uuid: str):
     thing = Thing.from_uuid(thing_uuid, dsn=get_envvar("CONFIGDB_DSN"))
     if thing.ext_api is not None:
         ext_api_name = thing.ext_api.api_type_name
-        datetime_from, datetime_to = TIMERANGE_MAPPING[ext_api_name](thing)
+        timerange_fn = TIMERANGE_MAPPING.get(ext_api_name, get_default_timerange)
+        datetime_from, datetime_to = timerange_fn(thing)
         message = {
             "thing": thing.uuid,
             "datetime_from": datetime_from,

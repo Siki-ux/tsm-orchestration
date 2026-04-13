@@ -27,7 +27,7 @@ def collect_params(test: feta.QAQCTest):
                 stream["sta_stream_id"],
             )
         )
-    for key, value in test.args.items():
+    for key, value in (test.args or {}).items():
         params.append(Param(key, value))
     return params
 

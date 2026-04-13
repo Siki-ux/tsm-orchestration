@@ -67,8 +67,8 @@ class SyncExtSftpManager(AbstractHandler):
             bucket_name=thing.s3_store.bucket,
             secure=minio_secure,
         )
-        priv_key = decrypt(thing.ext_sftp.ssh_priv_key, get_crypt_key())
-        password = decrypt(thing.ext_sftp.password, get_crypt_key())
+        priv_key = decrypt(thing.ext_sftp.ssh_priv_key, get_crypt_key()) if thing.ext_sftp.ssh_priv_key else ""
+        password = decrypt(thing.ext_sftp.password, get_crypt_key()) if thing.ext_sftp.password else ""
         try:
             source = FtpFS.from_credentials(
                 uri=thing.ext_sftp.uri,

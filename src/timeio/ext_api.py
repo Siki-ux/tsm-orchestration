@@ -614,3 +614,31 @@ class NmApiSyncer(ExtApiSyncer):
                     }
                 )
         return {"observations": bodies}
+
+
+class CustomApiSyncer(ExtApiSyncer):
+    """Dynamically loads and delegates to a user-uploaded syncer script."""
+
+    def __init__(self, script_code: str):
+        namespace = {"ExtApiSyncer": ExtApiSyncer}
+        exec(script_code, namespace)
+        syncer_cls = None
+        for obj in namespace.values():
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, ExtApiSyncer)
+                and obj is not ExtApiSyncer
+            ):
+                syncer_cls = obj
+                break
+        if not syncer_cls:
+            raise ValueError(
+                "Uploaded script does not define an ExtApiSyncer subclass"
+            )
+        self._delegate = syncer_cls()
+
+    def fetch_api_data(self, thing, content):
+        return self._delegate.fetch_api_data(thing, content)
+
+    def do_parse(self, api_response):
+        return self._delegate.do_parse(api_response)

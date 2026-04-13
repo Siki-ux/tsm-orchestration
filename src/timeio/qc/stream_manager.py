@@ -32,6 +32,27 @@ class StreamManager:
         self._streams: dict[str, Datastream] = {}
         self._conn = db_conn
 
+    def discover_thing_streams(self, thing_uuid: str) -> list:
+        """Return StreamInfo list for all STA streams linked to a thing UUID.
+
+        Used for project-level QC tests that have no configured streams (streams=None),
+        so they are applied automatically to all of the triggering thing's datastreams.
+        """
+        from timeio.qc.qctest import StreamInfo
+
+        query = (
+            "SELECT a.configuration_id as sta_thing_id, l.device_property_id as sta_stream_id "
+            "FROM public.sms_datastream_link l "
+            "JOIN public.sms_device_mount_action a ON l.device_mount_action_id = a.id "
+            "WHERE l.thing_id = %s::uuid"
+        )
+        with self._conn.cursor() as cur:
+            rows = cur.execute(query, [str(thing_uuid)]).fetchall()
+        return [
+            StreamInfo("field", f"stream_{row[1]}", row[0], row[1])
+            for row in rows
+        ]
+
     def get_schema(self, sta_thing_id):
         if sta_thing_id is None:
             return None
