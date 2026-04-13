@@ -1,4 +1,3 @@
----
 services:
 
 
@@ -270,6 +269,7 @@ services:
       GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: eduperson_principal_name
       GF_AUTH_OAUTH_SKIP_ORG_ROLE_UPDATE_SYNC: true
       GF_AUTH_GENERIC_OAUTH_SKIP_ORG_ROLE_SYNC: true
+      GF_DATABASE_WAL: "true"
       GF_SMTP_ENABLED: "${VISUALIZATION_SMTP_ENABLED}"
       GF_SMTP_HOST: "${VISUALIZATION_SMTP_HOST}"
       GF_SMTP_USER: "${VISUALIZATION_SMTP_USER}"
@@ -285,40 +285,13 @@ services:
       - "${VISUALIZATION_PERSISTENCE_VOLUME:-visualization}:/var/lib/grafana"
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     healthcheck:
-      test:  ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       start_period: 10s
     logging:
       options:
         max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
         max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
 
-
-  # Summary
-  # =======
-  # brief:
-  # dir:
-  # see also:
-  #
-  # Description
-  # ===========
-  # TODO
-  tsmdl:
-    image: "registry.hzdr.de/hub-terra/tsmdl-time-series-management-decoupling-layer/tsmdl-api:${TSMDL_IMAGE_TAG}"
-    restart: "${SERVICE_RESTART_POLICY}"
-    entrypoint: "/app/start.${TSMDL_ENVIRONMENT}.sh"
-    environment:
-      UFZ_DB_URL: "${DATABASE_ADMIN_DSN}"
-      STA_ENDPOINT_URL: "${STA_PROXY_URL}"
-      UVICORN_ARGS: "${TSMDL_UVICORN_ARGS}"
-      ROOT_PATH: /tsmdl
-      ORGANISATION: ufz
-    depends_on:
-      flyway:
-        condition: service_completed_successfully
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
 
   # Summary
   # =======
@@ -374,41 +347,6 @@ services:
     volumes:
       - "${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/usr/local/tomcat/conf/Catalina/localhost:ro"
       - ./tomcat/server.xml:/usr/local/tomcat/conf/server.xml:ro
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-
-  # Summary
-  # =======
-  # brief:
-  # dir:
-  # see also:
-  #
-  # Description
-  # ===========
-  # TODO
-  flyway-thing-management:
-    image: flyway/flyway:${FLYWAY_IMAGE_TAG}
-    user: "${UID}:${UID}"
-    command: -configFiles=/flyway/conf/flyway.conf -skipCheckForUpdate migrate
-    volumes:
-      - ./flyway/migrations/thing-management:/flyway/sql
-      - ./flyway/flyway-thing-management.conf:/flyway/conf/flyway.conf
-    environment:
-      FLYWAY_URL: "jdbc:postgresql://${DATABASE_ADMIN_HOST}/${DATABASE_ADMIN_DB_NAME}"
-      FLYWAY_USER: "${THING_MANAGEMENT_API_DATABASE_USER}"
-      FLYWAY_PASSWORD: "${THING_MANAGEMENT_API_DATABASE_PASS}"
-      FLYWAY_BASELINE_VERSION: "${FLYWAY_BASELINE_VERSION}"
-      FLYWAY_PLACEHOLDERS_THING_MANAGEMENT_DB_USER: "${THING_MANAGEMENT_API_DATABASE_USER}"
-      FLYWAY_PLACEHOLDERS_THING_MANAGEMENT_DB_PASSWORD: "${THING_MANAGEMENT_API_DATABASE_PASS}"
-      THING_MANAGEMENT_DATABASE_SCHEMA: "${THING_MANAGEMENT_API_DATABASE_SCHEMA:-thing_management_db}"
-    depends_on:
-      database:
-        condition: service_healthy
-      flyway:
-        condition: service_completed_successfully
     logging:
       options:
         max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
@@ -480,167 +418,6 @@ services:
   # Description
   # ===========
   # TODO
-  thing-management-frontend:
-    image: registry.hzdr.de/ufz-tsm/thing-management/frontend/thing-management:${THING_MANAGEMENT_FRONTEND_IMAGE_TAG}
-    restart: "${SERVICE_RESTART_POLICY}"
-    environment:
-      APP_URL: "${THING_MANAGEMENT_FRONTEND_APP_URL}"
-      API_URL: "${THING_MANAGEMENT_FRONTEND_API_URL}"
-      APP_PATH: "${THING_MANAGEMENT_FRONTEND_PATH}"
-      VERSION: "${THING_MANAGEMENT_FRONTEND_VERSION}"
-      OIDC_URL: "${THING_MANAGEMENT_FRONTEND_OIDC_URL}"
-      OIDC_CLIENT_ID: "${THING_MANAGEMENT_CLIENT_ID}"
-      OIDC_REDIRECT_URL: "${THING_MANAGEMENT_FRONTEND_REDIRECT_URL}"
-      OIDC_POST_LOGOUT_URL: "${THING_MANAGEMENT_FRONTEND_POST_LOGOUT_URL}"
-      OIDC_SCOPES: "${THING_MANAGEMENT_FRONTEND_SCOPES}"
-    depends_on:
-      thing-management-api:
-        condition: service_started
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-  # Summary
-  # =======
-  # brief:
-  # dir:
-  # see also:
-  #
-  # Description
-  # ===========
-  # TODO
-  thing-management-api:
-    image: registry.hzdr.de/ufz-tsm/thing-management/backend/thing-management-api:${THING_MANAGEMENT_API_IMAGE_TAG}
-    restart: "${SERVICE_RESTART_POLICY}"
-    healthcheck:
-      test: ["CMD", "sh", "-c", "nc -z 0.0.0.0 8002"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    environment:
-      ENVIRONMENT: "${THING_MANAGEMENT_API_ENVIRONMENT}"
-      DB_URL: "${THING_MANAGEMENT_API_DSN}"
-      DB_SCHEMA: "${THING_MANAGEMENT_API_DATABASE_SCHEMA:-thing_management_db}"
-      DB_HOST: "${DATABASE_ADMIN_HOST}"
-      DB_NAME: "${DATABASE_ADMIN_DB_NAME}"
-      MQTT_USER: "${THING_MANAGEMENT_MQTT_USER}"
-      MQTT_PASSWORD: "${THING_MANAGEMENT_MQTT_PASS}"
-      MQTT_PORT: "${THING_MANAGEMENT_MQTT_PORT:-1883}"
-      MQTT_BROKER_HOST: "${THING_MANAGEMENT_MQTT_HOST}"
-      MQTT_QOS: "${MQTT_QOS}"
-      MQTT_CLIENT_ID: thing_management
-      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
-      MINIO_SFTP_PORT: "${OBJECT_STORAGE_SFTP_PORT}"
-      PROXY_URL: "${PROXY_URL}"
-      ALLOWED_VOS: "${THING_MANAGEMENT_API_ALLOWED_VOS}"
-      OIDC_CONF_URL: "${THING_MANAGEMENT_API_OIDC_URL}/.well-known/openid-configuration"
-      OIDC_CLIENT_ID: "${THING_MANAGEMENT_CLIENT_ID}"
-      OIDC_CLIENT_SECRET: ""
-      OIDC_ADMIN_USERNAME: "${THING_MANAGEMENT_API_DATABASE_USER}"
-      OIDC_ADMIN_PASSWORD: "${THING_MANAGEMENT_API_DATABASE_PASS}"
-      OIDC_ALLOWED_ISSUERS: "${THING_MANAGEMENT_API_ALLOWED_ISSUERS}"
-      OIDC_ALLOWED_AUDIENCES: "${THING_MANAGEMENT_API_ALLOWED_AUDIENCES}"
-    depends_on:
-      mqtt-broker:
-        condition: service_healthy
-      flyway-thing-management:
-        condition: service_completed_successfully
-      keycloak:
-        condition: service_healthy
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-
-  # Summary
-  # =======
-  # brief: A user frontend to add things groups parser etc.
-  # dir:
-  # see also:
-  #
-  # Description
-  # ===========
-  # TODO
-  frontend:
-    image: "registry.hzdr.de/ufz-tsm/tsm-frontend/tsm-frontend:${THING_MANAGEMENT_LEGACY_IMAGE_TAG}"
-    restart: "${SERVICE_RESTART_POLICY}"
-    command: >
-      bash -c "python3 manage.py migrate
-      && python3 manage.py loaddata admin_interface_theme_foundation.json
-      && python3 manage.py loaddata ufz_theme.json
-      && python3 manage.py loaddata nm_station.json
-      && python3 manage.py createsuperuser --noinput
-      || echo 'Superuser already created'
-      && python3 manage.py collectstatic --noinput
-      && gunicorn main.wsgi:application --bind 0.0.0.0:8000 -w 6"
-    user: appuser
-    volumes:
-      - frontend-statics:/home/appuser/app/static
-      - sftp-private-keys:/home/appuser/app/sftp-private-keys
-      - ./frontend/user.json:/home/appuser/app/tsm/fixtures/user.json
-      - ./frontend/thing.json:/home/appuser/app/tsm/fixtures/thing.json
-      - ./frontend/nm_station.json:/home/appuser/app/tsm/fixtures/nm_station.json
-    entrypoint: ""
-    # ports:
-    #   - "127.0.0.1:8000:8000"
-    environment:
-      POSTGRES_HOST: "${THING_MANAGEMENT_LEGACY_DATABASE_HOST}"
-      POSTGRES_NAME: "${THING_MANAGEMENT_LEGACY_DATABASE_DB_NAME}"
-      POSTGRES_USER: "${THING_MANAGEMENT_LEGACY_DATABASE_USER}"
-      POSTGRES_PASSWORD: "${THING_MANAGEMENT_LEGACY_DATABASE_PASS}"
-      PUBLISH_THING_TO_BROKER: True
-      CREATEDB_POSTGRES_HOST: "${DATABASE_ADMIN_HOST}"
-      CREATEDB_POSTGRES_DATABASE: "${DATABASE_ADMIN_DB_NAME}"
-      MQTT_BROKER_HOST: "${THING_MANAGEMENT_MQTT_HOST}"
-      MQTT_USER: "${THING_MANAGEMENT_MQTT_USER}"
-      MQTT_PASSWORD: "${THING_MANAGEMENT_MQTT_PASS}"
-      MQTT_CLIENT_ID: frontend
-      DJANGO_SUPERUSER_USERNAME: "${THING_MANAGEMENT_LEGACY_DJANGO_SUPERUSER_USERNAME}"
-      DJANGO_SUPERUSER_PASSWORD: "${THING_MANAGEMENT_LEGACY_DJANGO_SUPERUSER_PASSWORD}"
-      DJANGO_SUPERUSER_EMAIL: "${THING_MANAGEMENT_LEGACY_DJANGO_SUPERUSER_EMAIL}"
-      DJANGO_SECRET_KEY: "${THING_MANAGEMENT_LEGACY_DJANGO_SECRET_KEY}"
-      DJANGO_DEBUG: "${THING_MANAGEMENT_LEGACY_DJANGO_DEBUG}"
-      DJANGO_TRUSTED_ORIGINS: "${THING_MANAGEMENT_LEGACY_DJANGO_TRUSTED_ORIGINS}"
-      DJANGO_BASE_PATH: "${THING_MANAGEMENT_LEGACY_DJANGO_BASE_PATH}"
-      DJANGO_ALLOWED_HOSTS: "${THING_MANAGEMENT_LEGACY_DJANGO_ALLOWED_HOSTS}"
-      POSTGRES_SSLMODE: "${THING_MANAGEMENT_LEGACY_DJANGO_POSTGRES_SSLMODE}"
-      DJANGO_HELMHOLTZ_CLIENT_ID: "${THING_MANAGEMENT_LEGACY_DJANGO_HELMHOLTZ_CLIENT_ID}"
-      DJANGO_HELMHOLTZ_CLIENT_SECRET: "${THING_MANAGEMENT_LEGACY_DJANGO_HELMHOLTZ_CLIENT_SECRET}"
-      DJANGO_HELMHOLTZ_AAI_CONF_URL: "${THING_MANAGEMENT_LEGACY_DJANGO_HELMHOLTZ_AAI_CONF_URL}"
-      MINIO_FTP_PORT: "${OBJECT_STORAGE_FTP_PORT}"
-      MINIO_SFTP_PORT: "${OBJECT_STORAGE_SFTP_PORT}"
-      PROXY_URL: "${PROXY_URL}"
-      ALLOWED_VOS: "${THING_MANAGEMENT_LEGACY_ALLOWED_VOS}"
-      STA_ROOT_URL: "${THING_MANAGEMENT_LEGACY_STA_ROOT_URL}"
-      QAQC_SETTING_SAQC_VERSION: "${THING_MANAGEMENT_LEGACY_QAQC_SETTING_SAQC_VERSION}"
-      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
-    depends_on:
-      mqtt-broker:
-        condition: service_healthy
-      worker-configdb-updater:
-        condition: service_started
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-
-  # Summary
-  # =======
-  # brief: Make services accessible on single address  (eg. tsm.ufz.de)
-  # dir: nginx
-  # see also: ./nginx/*.conf
-  #
-  # Description
-  # ===========
-  # This maps service endpoints to a path on a main URL, mainly
-  #  - the service  frontend       to  URL/frontend
-  #  - the service  object-storage to  URL/object-storage
-  #  - the service  visualization  to  URL/visualization
-  #  - the service  frost          to  URL/sta
-  #  - the service  tsmdl          to  URL/tsmdl
   proxy:
     image: "${PROXY_NGINX_IMAGE_REGISTRY}:${PROXY_NGINX_IMAGE_TAG}"
     restart: "${SERVICE_RESTART_POLICY}"
@@ -657,17 +434,11 @@ services:
       - "${PROXY_TLS_CERT_PATH}:/etc/ssl/public.crt:ro"
       - "${PROXY_TLS_KEY_PATH}:/etc/ssl/private.key:ro"
     depends_on:
-      frontend:
-        condition: service_started
       visualization:
         condition: service_started
       object-storage:
         condition: service_started
-      tsmdl:
-        condition: service_started
       frost:
-        condition: service_started
-      thing-management-frontend:
         condition: service_started
       keycloak:
         condition: service_healthy
@@ -763,6 +534,7 @@ services:
       GRAFANA_PASSWORD: "${VISUALIZATION_PASSWORD}"
       GRAFANA_DEFAULT_DATASOURCE_SSLMODE: "${VISUALIZATION_DEFAULT_DATASOURCE_SSLMODE}"
       DB_API_BASE_URL: "${DB_API_BASE_URL}"
+      DB_API_AUTH_TOKEN: "${DB_API_AUTH_TOKEN}"
       JOURNALING: "${JOURNALING}"
       FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
       CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
@@ -907,6 +679,92 @@ services:
         max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
 
 
+  worker-sync-extapi:
+    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
+    build:
+      context: .
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: "${UID}"
+        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
+        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
+    restart: "${SERVICE_WORKER_RESTART_POLICY}"
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: "${LOG_LEVEL}"
+      TOPIC: sync_ext_apis
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: "${MQTT_USER}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD}"
+      MQTT_CLIENT_ID: sync-extapi
+      MQTT_CLEAN_SESSION: "${MQTT_CLEAN_SESSION}"
+      MQTT_QOS: "${MQTT_QOS}"
+      TOPIC_DATA_PARSED: "${TOPIC_DATA_PARSED}"
+      CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
+      DB_API_BASE_URL: "${DB_API_BASE_URL}"
+      DB_API_AUTH_TOKEN: "${DB_API_AUTH_TOKEN}"
+      JOURNALING: "${JOURNALING}"
+      MINIO_URL: "${OBJECT_STORAGE_HOST}"
+      MINIO_USER: "${OBJECT_STORAGE_ROOT_USER}"
+      MINIO_PASSWORD: "${OBJECT_STORAGE_ROOT_PASSWORD}"
+      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
+      RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
+      RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
+    entrypoint: ["./worker_launcher.sh", "python3", "sync_extapi_manager.py"]
+    logging:
+      options:
+        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
+        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
+
+
+  worker-sync-extsftp:
+    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
+    build:
+      context: .
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: "${UID}"
+        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
+        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
+    restart: "${SERVICE_WORKER_RESTART_POLICY}"
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      object-storage:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: "${LOG_LEVEL}"
+      TOPIC: sync_ext_sftp
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: "${MQTT_USER}"
+      MQTT_PASSWORD: "${MQTT_PASSWORD}"
+      MQTT_CLIENT_ID: sync-extsftp
+      MQTT_CLEAN_SESSION: "${MQTT_CLEAN_SESSION}"
+      MQTT_QOS: "${MQTT_QOS}"
+      CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
+      MINIO_SECURE: "${OBJECT_STORAGE_SECURE}"
+      MINIO_URL: "${OBJECT_STORAGE_HOST}"
+      MINIO_USER: "${OBJECT_STORAGE_ROOT_USER}"
+      MINIO_PASSWORD: "${OBJECT_STORAGE_ROOT_PASSWORD}"
+      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
+      DB_API_BASE_URL: "${DB_API_BASE_URL}"
+      DB_API_AUTH_TOKEN: "${DB_API_AUTH_TOKEN}"
+      JOURNALING: "${JOURNALING}"
+      RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
+      RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
+    entrypoint: ["./worker_launcher.sh", "python3", "sync_extsftp_manager.py"]
+    volumes:
+      - sftp-private-keys:/sftp-private-keys:ro
+    logging:
+      options:
+        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
+        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
+
+
 
   # =================================================================
   # other worker
@@ -959,141 +817,6 @@ services:
   # Description
   # ===========
   # Fetches data from the respective extAPI and inserts it into TimeIO via the DB API.
-  worker-sync-extapis:
-    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
-    build:
-      context: .
-      dockerfile: dispatcher/Dockerfile
-      args:
-        UID: "${UID}"
-        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
-        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
-    restart: "${SERVICE_WORKER_RESTART_POLICY}"
-    depends_on:
-      mqtt-broker:
-        condition: service_healthy
-      init:
-        condition: service_completed_successfully
-      timeio-db-api:
-        condition: service_healthy
-    environment:
-      LOG_LEVEL: "${LOG_LEVEL}"
-      TOPIC: sync_ext_apis
-      MQTT_BROKER: mqtt-broker:1883
-      MQTT_USER: "${MQTT_USER}"
-      MQTT_PASSWORD: "${MQTT_PASSWORD}"
-      MQTT_CLIENT_ID: sync-ext-apis
-      MQTT_CLEAN_SESSION: "${MQTT_CLEAN_SESSION}"
-      MQTT_QOS: "${MQTT_QOS}"
-      DB_API_BASE_URL: "${DB_API_BASE_URL}"
-      DB_API_AUTH_TOKEN: "${DB_API_AUTH_TOKEN}"
-      JOURNALING: "${JOURNALING}"
-      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
-      CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
-      RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
-      RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
-    entrypoint: ["./worker_launcher.sh", "python3", "sync_extapi_manager.py"]
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-  # Summary
-  # =======
-  # brief:  trigger sync of sftp fileserver for given thing
-  #
-  # Description
-  # ===========
-  # Syncs files from external SFTP server with MinIO
-  worker-sync-extsftp:
-    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
-    build:
-      context: .
-      dockerfile: dispatcher/Dockerfile
-      args:
-        UID: "${UID}"
-        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
-        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
-    restart: "${SERVICE_WORKER_RESTART_POLICY}"
-    depends_on:
-      mqtt-broker:
-        condition: service_healthy
-      init:
-        condition: service_completed_successfully
-    environment:
-      LOG_LEVEL: "${LOG_LEVEL}"
-      TOPIC: sync_ext_sftp
-      MQTT_BROKER: mqtt-broker:1883
-      MQTT_USER: "${MQTT_USER}"
-      MQTT_PASSWORD: "${MQTT_PASSWORD}"
-      MQTT_CLIENT_ID: sync-ext-sftp
-      MQTT_CLEAN_SESSION: "${MQTT_CLEAN_SESSION}"
-      MQTT_QOS: "${MQTT_QOS}"
-      DB_API_BASE_URL: "${DB_API_BASE_URL}"
-      JOURNALING: "${JOURNALING}"
-      FERNET_ENCRYPTION_SECRET: "${FERNET_ENCRYPTION_SECRET}"
-      CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
-      MINIO_URL: "${OBJECT_STORAGE_HOST}"
-      MINIO_USER: "${OBJECT_STORAGE_ROOT_USER}"
-      MINIO_PASSWORD: "${OBJECT_STORAGE_ROOT_PASSWORD}"
-      MINIO_SECURE: "${OBJECT_STORAGE_SECURE}"
-      RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
-      RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
-    entrypoint: [ "./worker_launcher.sh", "python3", "sync_extsftp_manager.py" ]
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-  # Summary
-  # =======
-  # brief:  trigger sync of SMS bacckend (MV) and SMS CV data
-  #
-  # Description
-  # ===========
-  # Syncs data from SMS DB and SMS CV DB
-  worker-sync-sms:
-    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
-    build:
-      context: .
-      dockerfile: dispatcher/Dockerfile
-      args:
-        UID: "${UID}"
-        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
-        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
-    restart: "${SERVICE_WORKER_RESTART_POLICY}"
-    depends_on:
-      mqtt-broker:
-        condition: service_healthy
-      init:
-        condition: service_completed_successfully
-    environment:
-      LOG_LEVEL: "${LOG_LEVEL}"
-      TOPIC: sync_sms
-      MQTT_BROKER: mqtt-broker:1883
-      MQTT_USER: "${MQTT_USER}"
-      MQTT_PASSWORD: "${MQTT_PASSWORD}"
-      MQTT_CLIENT_ID: sync-sms
-      MQTT_CLEAN_SESSION: "${MQTT_CLEAN_SESSION}"
-      MQTT_QOS: "${MQTT_QOS}"
-      JOURNALING: "${JOURNALING}"
-      DATABASE_DSN: "${DATABASE_ADMIN_DSN}"
-      CV_API_URL: "${CRON_CV_API_URL}"
-      RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
-      RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
-    entrypoint: [ "./worker_launcher.sh", "python3", "sync_sms_manager.py" ]
-    logging:
-      options:
-        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
-        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
-  # Summary
-  # =======
-  # brief:  trigger sync of mqtt monitoring metrics
-  #
-  # Description
-  # ===========
-  # Fetches monitoring metrics from the mqtt broker and inserts it into TimeIO.
   worker-monitor-mqtt:
     image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
     build:
@@ -1122,7 +845,7 @@ services:
       MONITORING_SCHEMA: "${MONITORING_DATABASE_USER}"
       RESTART_MAX_ATTEMPTS: "${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}"
       RESTART_WINDOW_SECONDS: "${SERVICE_WORKER_RESTART_WINDOW_SECONDS}"
-    entrypoint: [ "./worker_launcher.sh", "python3", "run_mqtt_monitoring.py" ]
+    entrypoint: ["./worker_launcher.sh", "python3", "run_mqtt_monitoring.py"]
     logging:
       options:
         max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
@@ -1195,7 +918,10 @@ services:
         max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
 
   keycloak:
-    image: "${KEYCLOAK_IMAGE_REGISTRY}:${KEYCLOAK_IMAGE_TAG}"
+    build:
+      context: ./keycloak
+      dockerfile: Dockerfile
+    image: "tsm-keycloak:local"
     restart: "${SERVICE_RESTART_POLICY}"
     user: "${KEYCLOAK_UID:-1000}:${KEYCLOAK_GID:-1000}"
     depends_on:
@@ -1213,8 +939,7 @@ services:
       KC_DB_PASSWORD: "${KEYCLOAK_DATABASE_PASS}"
       KC_PROXY_HEADERS: "${KEYCLOAK_PROXY_HEADERS}"
       KC_HTTP_ENABLED: "${KEYCLOAK_HTTP_ENABLED}"
-      KC_HOSTNAME_URL: "${KEYCLOAK_HOSTNAME_URL}"
-      KC_HOSTNAME: "${KEYCLOAK_HOSTNAME}"
+      KC_HOSTNAME: "${KEYCLOAK_HOSTNAME_URL}"
       KC_HTTP_RELATIVE_PATH: "${KEYCLOAK_HTTP_RELATIVE_PATH}"
       KC_HEALTH_ENABLED: "true"
       # Helmholtz AAI config (used in configuration template)
@@ -1258,10 +983,10 @@ services:
       start_period: 5s
     volumes:
       - "./keycloak/keycloak-init.template.json:/opt/keycloak/data/import/keycloak-init.json"
-      - "./keycloak/themes:/opt/keycloak/themes"
-      - "./keycloak/plugins:/opt/keycloak/providers"
+      # themes and plugins are baked into the image via keycloak/Dockerfile — no bind-mounts needed
     command:
       - ${KEYCLOAK_START_COMMAND}
+      - --optimized
       - --import-realm
       - --http-port=${KEYCLOAK_PORT}
 
@@ -1283,22 +1008,25 @@ services:
       -P "${MQTT_PASSWORD}"
       --id "mqtt-cat"
 
-  monitoring:
-    image: "${MONITORING_CADVISOR_IMAGE_REGISTRY}:${MONITORING_CADVISOR_IMAGE_TAG}"
-    restart: "${SERVICE_RESTART_POLICY}"
-    container_name: cadvisor
-    ports:
-      - "${MONITORING_PORT}:8080"
+  # =================================================================
+  # test SFTP server for external SFTP demo
+  # =================================================================
+
+  test-sftp-server:
+    image: atmoz/sftp:alpine-3.7
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
+      - ./test-sftp-data:/home/testuser/data:ro
+    command: "testuser:testpass:1001"
+    healthcheck:
+      test: ["CMD-SHELL", "ssh-keyscan -T 3 -p 22 localhost >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     logging:
       options:
         max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
         max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
-
 
 volumes:
   frontend-statics:
