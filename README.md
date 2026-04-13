@@ -142,15 +142,16 @@ sequenceDiagram
 
 ## 📊 Database Schema
 
-### Core Tables (public schema)
+### Core Tables (`config_db` schema)
 
 | Table | Purpose |
 |-------|---------|
-| `thing_config` | Thing configuration from MQTT events |
-| `schema_thing_mapping` | Maps schemas to thing UUIDs |
-| `mqtt_auth` | MQTT user authentication |
-| `parser_type` | Available parser types |
-| `device_type` | Supported device types |
+| `thing` | Thing configuration from MQTT events |
+| `schema_thing_mapping` | Maps schemas to thing UUIDs (in `public`) |
+| `file_parser_type` | Available parser types |
+| `mqtt_device_type` | Supported device types |
+| `project` | Project groupings |
+| `database` | Database connection info per thing |
 
 ### Per-Thing Schema (`{project_schema}`)
 
@@ -213,7 +214,9 @@ settings for its infrastructure like database credentials or parser
 properties. When somebody enters or changes settings of a *thing* these
 changes are populated to *action services* by MQTT events.
 
-### Option A: Using legacy event format
+### Option A: Using legacy event format (deprecated)
+
+> **Note**: The `thing_creation` topic may no longer be active. Use Option B instead.
 
 ```bash
 cat thing-event-msg.json | docker-compose exec -T mqtt-broker sh -c "mosquitto_pub -t thing_creation -u \$MQTT_USER -P \$MQTT_PASSWORD -s"
@@ -540,7 +543,7 @@ For dynamic acls from database: https://gist.github.com/TheAshwanik/7ed2a3032ca1
 
 ## Minio
 
-- Yes, we really need four volumes, otherwise object lock will not work.
+- MinIO uses a single volume mount (`/minio`).
 - Find the current event ARN to configure bucket notifications:
 
     ```bash
