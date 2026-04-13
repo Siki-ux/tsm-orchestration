@@ -1,0 +1,835 @@
+services:
+  init:
+    image: ${TIMEIO_IMAGE_REGISTRY}/init:${TIMEIO_INIT_IMAGE_TAG}
+    build:
+      context: init
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${INIT_ALPINE_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${INIT_ALPINE_BASE_IMAGE_TAG}
+    restart: 'no'
+    user: root
+    volumes:
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/init/init.sh:/init.sh:ro
+    - ${OBJECT_STORAGE_PERSISTENCE_VOLUME:-object-storage}:/tmp/volume/minio
+    - ${CRON_PERSISTENCE_VOLUME:-crontab}:/tmp/volume/cron
+    - ${DATABASE_PERSISTENCE_VOLUME:-database}:/tmp/volume/database
+    - ${MQTT_PERSISTENCE_VOLUME:-mqtt-broker}:/tmp/volume/mqtt
+    - ${VISUALIZATION_PERSISTENCE_VOLUME:-visualization}:/tmp/volume/visualization
+    - ${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/tmp/volume/tomcat
+    - ${OBJECT_STORAGE_FTP_TLS_CRT}:/tmp/bind/minio/minio-ftp.crt:ro
+    - ${OBJECT_STORAGE_FTP_TLS_KEY}:/tmp/bind/minio/minio-ftp.key:ro
+    - ${OBJECT_STORAGE_SFTP_HOSTKEY}:/tmp/bind/minio/id_ed25519:ro
+    - ${MQTT_MOSQUITTO_TLS_CERT_PATH}:/tmp/bind/mqtt/server.crt:ro
+    - ${MQTT_MOSQUITTO_TLS_KEY_PATH}:/tmp/bind/mqtt/server.key:ro
+    - ${MQTT_MOSQUITTO_TLS_CA_PATH}:/tmp/bind/mqtt/ca.crt:ro
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/flyway:/tmp/conf/flyway
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/mosquitto:/tmp/conf/mosquitto
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/nginx:/tmp/conf/nginx
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/keycloak:/tmp/conf/keycloak
+    environment:
+      SYSTEM_USER: ${UID}
+      OBJECT_STORAGE_USER: ${OBJECT_STORAGE_UID}
+      USE_CHOWN: ${INIT_USE_CHOWN}
+      USE_CHOWN_OBJECT_STORAGE: ${INIT_USE_CHOWN_OBJECT_STORAGE}
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  database:
+    restart: ${SERVICE_RESTART_POLICY}
+    image: ${DATABASE_POSTGRES_IMAGE_REGISTRY}:${DATABASE_POSTGRES_IMAGE_TAG}
+    ports:
+    - ${DATABASE_PORT}:5432
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+    - ${DATABASE_PERSISTENCE_VOLUME:-database}:/var/lib/postgresql/data
+    user: $UID
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U $DATABASE_USER
+      interval: ${DATABASE_HEALTHCHECK_INTERVAL}
+      timeout: 5s
+      retries: 10
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  object-storage:
+    image: ${OBJECT_STORAGE_MINIO_IMAGE_REGISTRY}:${OBJECT_STORAGE_MINIO_IMAGE_TAG}
+    restart: ${SERVICE_RESTART_POLICY}
+    ports:
+    - ${OBJECT_STORAGE_SFTP_PORT}:22
+    - ${OBJECT_STORAGE_FTP_PORT}:21
+    - ${OBJECT_STORAGE_FTP_PASV_PORTS_MAPPING}
+    depends_on:
+      mqtt-broker:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      MINIO_BROWSER_REDIRECT_URL: ${OBJECT_STORAGE_BROWSER_REDIRECT_URL}
+      MINIO_NOTIFY_MQTT_ENABLE_LOCAL_BROKER: true
+      MINIO_NOTIFY_MQTT_BROKER_LOCAL_BROKER: tcp://mqtt-broker:1883
+      MINIO_NOTIFY_MQTT_TOPIC_LOCAL_BROKER: object_storage_notification
+      MINIO_NOTIFY_MQTT_USERNAME_LOCAL_BROKER: ${MQTT_USER}
+      MINIO_NOTIFY_MQTT_PASSWORD_LOCAL_BROKER: ${MQTT_PASSWORD}
+      MINIO_NOTIFY_MQTT_KEEP_ALIVE_INTERVAL_LOCAL_BROKER: 60s
+      MINIO_NOTIFY_MQTT_QOS_LOCAL_BROKER: ${MQTT_QOS}
+      MINIO_NOTIFY_MQTT_RECONNECT_INTERVAL_LOCAL_BROKER: 60s
+      MINIO_SERVER_URL: ${OBJECT_STORAGE_SERVER_URL}
+    volumes:
+    - ${OBJECT_STORAGE_PERSISTENCE_VOLUME:-object-storage}:/minio
+    user: ${OBJECT_STORAGE_UID}:${OBJECT_STORAGE_UID}
+    command: 'server --console-address :9001 --ftp address=:21 --ftp passive-port-range=30000-30010
+      --sftp address=:22 --sftp ssh-private-key=/minio/certs/id_ed25519 --ftp tls-private-key=/minio/certs/minio-ftp.key
+      --ftp tls-public-cert=/minio/certs/minio-ftp.crt --json /minio/vol0
+
+      '
+    healthcheck:
+      test: timeout 5s bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1
+      interval: ${OBJECT_STORAGE_HEALTHCHECK_INTERVAL}
+      timeout: 5s
+      retries: 15
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  mqtt-broker:
+    restart: ${SERVICE_RESTART_POLICY}
+    image: ${MQTT_BROKER_MOSQUITTO_IMAGE_REGISTRY}:${MQTT_BROKER_MOSQUITTO_IMAGE_TAG}
+    command: '/usr/sbin/mosquitto -c /var/lib/mosquitto/mosquitto.conf
+
+      '
+    entrypoint:
+    - /docker-entrypoint.sh
+    user: ${UID}:${GID}
+    environment:
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_INGEST_USER: ${MQTT_INGEST_USER}
+      MQTT_INGEST_PASSWORD: ${MQTT_INGEST_PASSWORD}
+      MQTT_AUTH_POSTGRES_HOST: ${MQTT_AUTH_POSTGRES_HOST}
+      MQTT_AUTH_POSTGRES_PORT: ${MQTT_AUTH_POSTGRES_PORT}
+      MQTT_AUTH_POSTGRES_USER: ${MQTT_AUTH_POSTGRES_USER}
+      MQTT_AUTH_POSTGRES_PASS: ${MQTT_AUTH_POSTGRES_PASS}
+      MQTT_AUTH_POSTGRES_DB: ${MQTT_AUTH_POSTGRES_DB}
+      MQTT_AUTH_PG_TLSMODE: ${MQTT_AUTH_PG_TLSMODE}
+      FRONTEND_MQTT_USER: ${THING_MANAGEMENT_MQTT_USER}
+      FRONTEND_MQTT_PASS: ${THING_MANAGEMENT_MQTT_PASS}
+    ports:
+    - ${MQTT_PORT}:1883
+    - ${MQTT_PORT_SECURE}:8883
+    volumes:
+    - ${MQTT_MOSQUITTO_CONFIG}:/etc/mosquitto/config/mosquitto.conf:ro
+    - ${MQTT_MOSQUITTO_TLS_CONFIG}:/etc/mosquitto/config/tls/mosquitto.tls.conf:ro
+    - ${MQTT_PERSISTENCE_VOLUME:-mqtt-broker}:/tmp/mosquitto/
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/mosquitto/docker-entrypoint.sh:/docker-entrypoint.sh
+    tmpfs:
+    - /var/lib/mosquitto/
+    healthcheck:
+      test: 'mosquitto_sub -C 1 -t ''$$SYS/broker/version'' -u "${MQTT_USER}" -P "${MQTT_PASSWORD}"
+        --id docker-compose-healthcheck
+
+        '
+      interval: ${MQTT_BROKER_HEALTHCHECK_INTERVAL}
+      start_period: 20s
+      timeout: 10s
+      retries: 12
+    logging:
+      options:
+        max-size: ${MQTT_BROKER_LOG_SIZE}
+        max-file: ${MQTT_BROKER_FILE_COUNT}
+  visualization:
+    restart: ${SERVICE_RESTART_POLICY}
+    image: ${VISUALIZATION_GRAFANA_IMAGE_REGISTRY}:${VISUALIZATION_GRAFANA_IMAGE_TAG}
+    user: ${UID}:${GID}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${VISUALIZATION_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${VISUALIZATION_PASSWORD}
+      GF_SECURITY_ALLOW_EMBEDDING: true
+      GF_SERVER_ROOT_URL: ${VISUALIZATION_PROXY_URL}
+      GF_SERVER_SERVE_FROM_SUB_PATH: true
+      GF_AUTH_GENERIC_OAUTH_ENABLED: true
+      GF_AUTH_GENERIC_OAUTH_NAME: time.IO Keycloak
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP: true
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: ${VISUALIZATION_KEYCLOAK_CLIENT_ID}
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: ${VISUALIZATION_KEYCLOAK_CLIENT_SECRET}
+      GF_AUTH_GENERIC_OAUTH_SCOPES: openid email profile eduperson_principal_name
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: ${VISUALIZATION_GENERIC_OAUTH_AUTH_URL}
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: ${VISUALIZATION_GENERIC_OAUTH_TOKEN_URL}
+      GF_AUTH_GENERIC_OAUTH_API_URL: ${VISUALIZATION_GENERIC_OAUTH_API_URL}
+      GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: eduperson_principal_name
+      GF_AUTH_OAUTH_SKIP_ORG_ROLE_UPDATE_SYNC: true
+      GF_AUTH_GENERIC_OAUTH_SKIP_ORG_ROLE_SYNC: true
+      GF_DATABASE_WAL: 'true'
+      GF_SMTP_ENABLED: ${VISUALIZATION_SMTP_ENABLED}
+      GF_SMTP_HOST: ${VISUALIZATION_SMTP_HOST}
+      GF_SMTP_USER: ${VISUALIZATION_SMTP_USER}
+      GF_SMTP_PASSWORD: ${VISUALIZATION_SMTP_PASSWORD}
+      GF_SMTP_FROM_ADDRESS: ${VISUALIZATION_SMTP_FROM_ADDRESS}
+      GF_SMTP_FROM_NAME: ${VISUALIZATION_SMTP_FROM_NAME}
+      MONITORING_DATABASE_HOST: ${MONITORING_DATABASE_HOST}
+      MONITORING_DATABASE_USER: ${MONITORING_DATABASE_USER}
+      MONITORING_DATABASE_PASS: ${MONITORING_DATABASE_PASS}
+      MONITORING_DATABASE_DB: ${MONITORING_DATABASE_DB}
+      MONITORING_DATABASE_SSLMODE: ${MONITORING_DATABASE_SSLMODE}
+    volumes:
+    - ${VISUALIZATION_PERSISTENCE_VOLUME:-visualization}:/var/lib/grafana
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/grafana/provisioning:/etc/grafana/provisioning:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - curl -f http://localhost:3000/api/health || exit 1
+      start_period: 10s
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  timeio-db-api:
+    image: registry.hzdr.de/ufz-tsm/timeio-db-api/timeio-db-api:${DB_API_IMAGE_TAG}
+    restart: ${SERVICE_RESTART_POLICY}
+    entrypoint: sh /app/start.sh
+    environment:
+      DB_URL: ${DATABASE_ADMIN_DSN}
+      UVICORN_ARGS: ${DB_API_UVICORN_ARGS} --root-path /db_api
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+    healthcheck:
+      test: 'wget -q http://0.0.0.0:8001/dbhealth -O /dev/null || exit 1
+
+        '
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    logging:
+      options:
+        max-size: ${DB_API_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  frost:
+    image: ${TIMEIO_IMAGE_REGISTRY}/frost:${TIMEIO_FROST_IMAGE_TAG}
+    build:
+      context: tomcat
+      args:
+        BASE_IMAGE_REGISTRY: ${FROST_TOMCAT_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${FROST_TOMCAT_BASE_IMAGE_TAG}
+        FROST_VERSION: ${STA_FROST_VERSION}
+        UID: ${UID}
+        GID: ${GID}
+    restart: ${SERVICE_RESTART_POLICY}
+    volumes:
+    - ${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/usr/local/tomcat/conf/Catalina/localhost:ro
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/tomcat/server.xml:/usr/local/tomcat/conf/server.xml:ro
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  flyway:
+    image: ${FLYWAY_IMAGE_REGISTRY}:${FLYWAY_IMAGE_TAG}
+    user: ${UID}:${UID}
+    command: -configFiles=/flyway/conf/flyway.conf -skipCheckForUpdate migrate
+    volumes:
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/flyway/migrations/public:/flyway/sql
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/flyway/flyway-public.conf:/flyway/conf/flyway.conf
+    environment:
+      FLYWAY_URL: jdbc:postgresql://${DATABASE_ADMIN_HOST}/${DATABASE_ADMIN_DB_NAME}
+      FLYWAY_USER: ${DATABASE_ADMIN_USER}
+      FLYWAY_PASSWORD: ${DATABASE_ADMIN_PASSWORD}
+      FLYWAY_BASELINE_VERSION: ${FLYWAY_BASELINE_VERSION}
+      FLYWAY_CONNECT_RETRIES: 10
+      FLYWAY_CONNECT_RETRIES_INTERVAL: 3
+      FLYWAY_PLACEHOLDERS_CONFIGDB_USER: ${CONFIGDB_READONLY_USER}
+      FLYWAY_PLACEHOLDERS_CONFIGDB_PASSWORD: ${CONFIGDB_READONLY_PASSWORD}
+      FLYWAY_PLACEHOLDERS_MQTT_AUTH_DB_USER: ${MQTT_AUTH_POSTGRES_USER}
+      FLYWAY_PLACEHOLDERS_MQTT_AUTH_DB_PASSWORD: ${MQTT_AUTH_POSTGRES_PASS}
+      FLYWAY_PLACEHOLDERS_FRONTEND_DB_USER: ${THING_MANAGEMENT_LEGACY_DATABASE_USER}
+      FLYWAY_PLACEHOLDERS_FRONTEND_DB_PASSWORD: ${THING_MANAGEMENT_LEGACY_DATABASE_PASS}
+      FLYWAY_PLACEHOLDERS_THING_MANAGEMENT_DB_USER: ${THING_MANAGEMENT_API_DATABASE_USER}
+      FLYWAY_PLACEHOLDERS_THING_MANAGEMENT_DB_PASSWORD: ${THING_MANAGEMENT_API_DATABASE_PASS}
+      FLYWAY_PLACEHOLDERS_KEYCLOAK_DB_USER: ${KEYCLOAK_DATABASE_USER}
+      FLYWAY_PLACEHOLDERS_KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DATABASE_PASS}
+      FLYWAY_PLACEHOLDERS_MONITORING_DB_USER: ${MONITORING_DATABASE_USER}
+      FLYWAY_PLACEHOLDERS_MONITORING_DB_PASSWORD: ${MONITORING_DATABASE_PASS}
+      FLYWAY_PLACEHOLDERS_SMS_ACCESS_TYPE: ${SMS_ACCESS_TYPE}
+      FLYWAY_PLACEHOLDERS_SMS_DB_USER: ${SMS_DB_USER}
+      FLYWAY_PLACEHOLDERS_SMS_DB_PASSWORD: ${SMS_DB_PASSWORD}
+      FLYWAY_PLACEHOLDERS_SMS_DB_PORT: ${SMS_DB_PORT}
+      FLYWAY_PLACEHOLDERS_SMS_DB_DB: ${SMS_DB_DB}
+      FLYWAY_PLACEHOLDERS_SMS_DB_HOST: ${SMS_DB_HOST}
+      FLYWAY_PLACEHOLDERS_CV_ACCESS_TYPE: ${CV_ACCESS_TYPE}
+      FLYWAY_PLACEHOLDERS_CV_DB_USER: ${CV_DB_USER}
+      FLYWAY_PLACEHOLDERS_CV_DB_PASSWORD: ${CV_DB_PASSWORD}
+      FLYWAY_PLACEHOLDERS_CV_DB_PORT: ${CV_DB_PORT}
+      FLYWAY_PLACEHOLDERS_CV_DB_DB: ${CV_DB_DB}
+      FLYWAY_PLACEHOLDERS_CV_DB_HOST: ${CV_DB_HOST}
+    depends_on:
+      database:
+        condition: service_healthy
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  proxy:
+    image: ${PROXY_NGINX_IMAGE_REGISTRY}:${PROXY_NGINX_IMAGE_TAG}
+    restart: ${SERVICE_RESTART_POLICY}
+    user: ${UID}:${GID}
+    ports:
+    - ${PROXY_PLAIN_PORT_MAPPING}
+    - ${PROXY_TLS_PORT_MAPPING}
+    - ${PROXY_MINIO_PORT_MAPPING}
+    volumes:
+    - frontend-statics:/home/appuser/app/static
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/nginx/html:/usr/share/nginx/html
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/nginx/${PROXY_SITE_CONFIG_FILE}:/etc/nginx/conf.d/default.conf:ro
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/nginx/locations:/etc/nginx/locations:ro
+    - ${PROXY_TLS_CERT_PATH}:/etc/ssl/public.crt:ro
+    - ${PROXY_TLS_KEY_PATH}:/etc/ssl/private.key:ro
+    depends_on:
+      visualization:
+        condition: service_started
+      object-storage:
+        condition: service_started
+      frost:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - curl -f http://localhost:80 || exit 1
+      start_period: 10s
+    logging:
+      options:
+        max-size: ${PROXY_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-configdb-updater:
+    image: ${TIMEIO_IMAGE_REGISTRY}/configdb-updater:${TIMEIO_CONFIGDB_UPDATER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: configdb_updater/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${CONFIGDB_UPDATER_PYTHON_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${CONFIGDB_UPDATER_PYTHON_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      MQTT_BROKER_HOST: mqtt-broker
+      MQTT_BROKER_PORT: 1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: configdb-updater
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_SUBSCRIBE_QOS: ${MQTT_QOS}
+      MQTT_PUBLISH_TOPIC: ${TOPIC_CONFIG_DB_UPDATE}
+      MQTT_PUBLISH_QOS: ${MQTT_QOS}
+      CONFIGDB_CONNECTION_INITIAL_TIMEOUT: 10
+      CONFIGDB_DSN: ${DATABASE_ADMIN_DSN}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - run_configdb_updater.py
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-thing-setup:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: ${TOPIC_CONFIG_DB_UPDATE}
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: thing-setup
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      DATABASE_URL: ${DATABASE_ADMIN_DSN}
+      SMS_URL: ${SMS_URL}
+      CV_URL: ${CV_URL}
+      TOMCAT_PROXY_URL: ${STA_PROXY_URL}
+      MINIO_SECURE: ${OBJECT_STORAGE_SECURE}
+      MINIO_URL: ${OBJECT_STORAGE_HOST}
+      MINIO_ACCESS_KEY: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_SECURE_KEY: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      GRAFANA_URL: ${VISUALIZATION_URL}
+      GRAFANA_USER: ${VISUALIZATION_USER}
+      GRAFANA_PASSWORD: ${VISUALIZATION_PASSWORD}
+      GRAFANA_DEFAULT_DATASOURCE_SSLMODE: ${VISUALIZATION_DEFAULT_DATASOURCE_SSLMODE}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      FERNET_ENCRYPTION_SECRET: ${FERNET_ENCRYPTION_SECRET}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - setup_thing.py
+    - all
+    volumes:
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/src:/home/appuser/app/src:ro
+    - ${CRON_PERSISTENCE_VOLUME:-crontab}:/tmp/cron
+    - ${FROST_PERSISTENCE_VOLUME:-tomcat-context}:/home/appuser/app/src/frost_context_files:rw
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-file-ingest:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      object-storage:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: object_storage_notification
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: file-ingest
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      TOPIC_DATA_PARSED: ${TOPIC_DATA_PARSED}
+      MINIO_SECURE: ${OBJECT_STORAGE_SECURE}
+      MINIO_URL: ${OBJECT_STORAGE_HOST}
+      MINIO_ACCESS_KEY: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_SECURE_KEY: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - run_file_ingest.py
+    volumes:
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/migrations/worker_file_ingest/datastream_mapping:/tmp/datastream_mapping/
+    logging:
+      options:
+        max-size: ${WROKER_FILE_INGEST_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-run-qaqc:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: ${TOPIC_DATA_PARSED}
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: worker-qaqc
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      TOPIC_QC_DONE: qaqc_done
+      TOPIC_QC_DONE_QOS: ${MQTT_QOS}
+      DATABASE_DSN: ${DATABASE_ADMIN_DSN}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - run_qc.py
+    logging:
+      options:
+        max-size: ${WORKER_RUN_QAQC_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-mqtt-ingest:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: mqtt_ingest/#
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_INGEST_USER}
+      MQTT_PASSWORD: ${MQTT_INGEST_PASSWORD}
+      MQTT_CLIENT_ID: mqtt-ingest
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      TOPIC_DATA_PARSED: ${TOPIC_DATA_PARSED}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      FERNET_ENCRYPTION_SECRET: ${FERNET_ENCRYPTION_SECRET}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - run_mqtt_ingest.py
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-sync-extapi:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: sync_ext_apis
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: sync-extapi
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      TOPIC_DATA_PARSED: ${TOPIC_DATA_PARSED}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      MINIO_URL: ${OBJECT_STORAGE_HOST}
+      MINIO_USER: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_PASSWORD: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      FERNET_ENCRYPTION_SECRET: ${FERNET_ENCRYPTION_SECRET}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - sync_extapi_manager.py
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-sync-extsftp:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      object-storage:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: sync_ext_sftp
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: sync-extsftp
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      MINIO_SECURE: ${OBJECT_STORAGE_SECURE}
+      MINIO_URL: ${OBJECT_STORAGE_HOST}
+      MINIO_USER: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_PASSWORD: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      FERNET_ENCRYPTION_SECRET: ${FERNET_ENCRYPTION_SECRET}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      DB_API_AUTH_TOKEN: ${DB_API_AUTH_TOKEN}
+      JOURNALING: ${JOURNALING}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - sync_extsftp_manager.py
+    volumes:
+    - sftp-private-keys:/sftp-private-keys:ro
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-grafana-user-orgs:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+      visualization:
+        condition: service_started
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: userinfo_keycloak
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: grafana-user-orgs
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      GRAFANA_URL: ${VISUALIZATION_URL}
+      GRAFANA_USER: ${VISUALIZATION_USER}
+      GRAFANA_PASSWORD: ${VISUALIZATION_PASSWORD}
+      ALLOWED_VOS: ${THING_MANAGEMENT_LEGACY_ALLOWED_VOS}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      JOURNALING: ${JOURNALING}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - setup_grafana_user.py
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  worker-monitor-mqtt:
+    image: ${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_WORKER_RESTART_POLICY}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL}
+      TOPIC: monitor_mqtt
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: monitor_mqtt
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      DSN: ${DATABASE_ADMIN_DSN}
+      MONITORING_SCHEMA: ${MONITORING_DATABASE_USER}
+      RESTART_MAX_ATTEMPTS: ${SERVICE_WORKER_RESTART_MAX_ATTEMPTS}
+      RESTART_WINDOW_SECONDS: ${SERVICE_WORKER_RESTART_WINDOW_SECONDS}
+    entrypoint:
+    - ./worker_launcher.sh
+    - python3
+    - run_mqtt_monitoring.py
+    logging:
+      options:
+        max-size: ${DEFAULT_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  cron-scheduler:
+    image: ${TIMEIO_IMAGE_REGISTRY}/cron-scheduler:${TIMEIO_CRON_SCHEDULER_IMAGE_TAG}
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration
+      dockerfile: cron/Dockerfile
+      args:
+        UID: ${UID}
+        BASE_IMAGE_REGISTRY: ${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}
+        BASE_IMAGE_TAG: ${CRON_SCHEDULER_DEBIAN_BASE_IMAGE_TAG}
+    restart: ${SERVICE_RESTART_POLICY}
+    cpus: 0.5
+    mem_limit: 4g
+    environment:
+      SETUP_SERVICE: ${CRON_SETUP_SERVICE}
+      CREATEDB_POSTGRES_USER: ${CRON_DATABASE_ADMIN_USER}
+      CREATEDB_POSTGRES_PASSWORD: ${CRON_DATABASE_ADMIN_PASSWORD}
+      CREATEDB_POSTGRES_HOST: ${CRON_DATABASE_ADMIN_HOST}
+      CREATEDB_POSTGRES_DATABASE: ${CRON_DATABASE_ADMIN_DB_NAME}
+      SMS_ACCESS_TYPE: ${CRON_SMS_ACCESS_TYPE}
+      SMS_API_URL: ${CRON_SMS_API_URL}
+      SMS_API_TOKEN: ${CRON_SMS_API_TOKEN}
+      CV_ACCESS_TYPE: ${CRON_CV_ACCESS_TYPE}
+      CV_API_URL: ${CRON_CV_API_URL}
+      LOG_LEVEL: ${LOG_LEVEL}
+      MINIO_URL: ${OBJECT_STORAGE_HOST}
+      MINIO_USER: ${OBJECT_STORAGE_ROOT_USER}
+      MINIO_PASSWORD: ${OBJECT_STORAGE_ROOT_PASSWORD}
+      MINIO_SECURE: ${OBJECT_STORAGE_SECURE}
+      CONFIGDB_DSN: ${CONFIGDB_READONLY_DSN}
+      DB_API_BASE_URL: ${DB_API_BASE_URL}
+      MQTT_BROKER: mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID: cron-scheduler
+      MQTT_CLEAN_SESSION: ${MQTT_CLEAN_SESSION}
+      MQTT_QOS: ${MQTT_QOS}
+      FERNET_ENCRYPTION_SECRET: ${FERNET_ENCRYPTION_SECRET}
+      JOURNALING: ${JOURNALING}
+      API_SYNC_TOPIC: sync_ext_apis
+      SFTP_SYNC_TOPIC: sync_ext_sftp
+      SMS_SYNC_TOPIC: sync_sms
+      MQTT_MONITORING_TOPIC: monitor_mqtt
+      DB_NAME: ${DATABASE_ADMIN_DB_NAME}
+      DB_HOST: ${DATABASE_ADMIN_HOST}
+      DATABASE_DSN: ${DATABASE_ADMIN_DSN}
+    healthcheck:
+      test: /supercronic-health.sh || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+    - ${CRON_PERSISTENCE_VOLUME:-crontab}:/tmp/cron
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/src:/scripts:ro
+    - sftp-private-keys:/sftp-private-keys:ro
+    logging:
+      options:
+        max-size: ${CRON_SCHEDULER_MAX_LOG_FILE_SIZE}
+        max-file: ${DEFAULT_MAX_LOG_FILE_COUNT}
+  keycloak:
+    build:
+      context: /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/keycloak
+      dockerfile: Dockerfile
+    image: tsm-keycloak:local
+    restart: ${SERVICE_RESTART_POLICY}
+    user: ${KEYCLOAK_UID:-1000}:${KEYCLOAK_GID:-1000}
+    depends_on:
+      mqtt-broker:
+        condition: service_healthy
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN_USER}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASS}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://${KEYCLOAK_DATABASE_HOST}/${KEYCLOAK_DATABASE_NAME}
+      KC_DB_SCHEMA: ${KEYCLOAK_DATABASE_USER}
+      KC_DB_USERNAME: ${KEYCLOAK_DATABASE_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DATABASE_PASS}
+      KC_PROXY_HEADERS: ${KEYCLOAK_PROXY_HEADERS}
+      KC_HTTP_ENABLED: ${KEYCLOAK_HTTP_ENABLED}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME_URL}
+      KC_HTTP_RELATIVE_PATH: ${KEYCLOAK_HTTP_RELATIVE_PATH}
+      KC_HEALTH_ENABLED: 'true'
+      KEYCLOAK_HELMHOLTZ_AAI_OAUTH_AUTH_URL: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2-as/oauth2-authz
+      KEYCLOAK_HELMHOLTZ_AAI_OAUTH_TOKEN_URL: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2/token
+      KEYCLOAK_HELMHOLTZ_AAI_OAUTH_USER_INFO_URL: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2/userinfo
+      KEYCLOAK_HELMHOLTZ_AAI_ISSUER: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2
+      KEYCLOAK_HELMHOLTZ_AAI_JWKS_URL: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2/jwk
+      KEYCLOAK_HELMHOLTZ_AAI_CLIENT: ${KEYCLOAK_HELMHOLTZ_AAI_CLIENT}
+      KEYCLOAK_HELMHOLTZ_AAI_META_DESCRIPTION_URL: ${KEYCLOAK_HELMHOLTZ_AAI_BASE_URL}/oauth2/.well-known/openid-configuration
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_REDIRECT_URIS: '["${THING_MANAGEMENT_FRONTEND_APP_URL}/login/callback"]'
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_POST_LOGOUT_URIS: ${THING_MANAGEMENT_FRONTEND_APP_URL}/login
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_ADMIN_URL: ${THING_MANAGEMENT_FRONTEND_APP_URL}
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_ROOT_URL: ${THING_MANAGEMENT_FRONTEND_APP_URL}
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_BASE_URL: ${THING_MANAGEMENT_FRONTEND_APP_URL}
+      KEYCLOAK_THING_MANAGEMENT_CLIENT_WEB_ORIGINS: '["${PROXY_URL}"]'
+      KEYCLOAK_GRAFANA_CLIENT_SECRET: ${VISUALIZATION_KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_GRAFANA_CLIENT_ID: ${VISUALIZATION_KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_GRAFANA_CLIENT_REDIRECT_URIS: '["${VISUALIZATION_PROXY_URL}login/generic_oauth"]'
+      KEYCLOAK_GRAFANA_CLIENT_POST_LOGOUT_URIS: ${VISUALIZATION_PROXY_URL}login
+      KEYCLOAK_GRAFANA_CLIENT_ADMIN_URL: ${VISUALIZATION_PROXY_URL}
+      KEYCLOAK_GRAFANA_CLIENT_ROOT_URL: ${VISUALIZATION_PROXY_URL}
+      KEYCLOAK_GRAFANA_CLIENT_BASE_URL: ${VISUALIZATION_PROXY_URL}
+      KEYCLOAK_GRAFANA_CLIENT_WEB_ORIGINS: '["${PROXY_URL}"]'
+      MQTT_BROKER: tcp://mqtt-broker:1883
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_TOPIC: userinfo_keycloak
+      MQTT_QOS: ${MQTT_QOS}
+    healthcheck:
+      test: "bash -c \"\n  exec 3<>/dev/tcp/localhost/${KEYCLOAK_PORT} &&\n  echo\
+        \ -e \"GET /keycloak/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\\
+        n\" >&3\n\"\n"
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
+    volumes:
+    - /mnt/c/Users/sx5258/repos/DP/tsm-orchestration/keycloak/keycloak-init.template.json:/opt/keycloak/data/import/keycloak-init.json
+    command:
+    - ${KEYCLOAK_START_COMMAND}
+    - --optimized
+    - --import-realm
+    - --http-port=${KEYCLOAK_PORT}
+  mqtt-cat:
+    restart: ${SERVICE_RESTART_POLICY}
+    image: ${MQTT_CAT_MOSQUITTO_IMAGE_REGISTRY}:${MQTT_CAT_MOSQUITTO_IMAGE_TAG}
+    depends_on:
+      mqtt-broker:
+        condition: service_started
+    logging:
+      options:
+        max-size: ${MQTT_CAT_LOG_SIZE}
+        max-file: ${MQTT_CAT_FILE_COUNT}
+    command: 'mosquitto_sub --pretty -v -h mqtt-broker -t "#" -u "${MQTT_USER}" -P
+      "${MQTT_PASSWORD}" --id "mqtt-cat"
+
+      '
+volumes:
+  frontend-statics: null
+  sftp-private-keys: null
+  tomcat-context: null
+  database: null
+  visualization: null
+  mqtt-broker: null
+  object-storage: null
+  crontab: null
