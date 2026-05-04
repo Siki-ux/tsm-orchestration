@@ -118,10 +118,11 @@ class QcTest:
         sm: StreamManager,
         start_date: TimestampT | None = None,
         end_date: TimestampT | None = None,
+        streams: list | None = None,
     ):
         data = {}
         qual = {}
-        for stream_info in self.streams:
+        for stream_info in (streams if streams is not None else self.streams):
             name = stream_info.value
             if name in data:
                 continue
@@ -136,6 +137,20 @@ class QcTest:
             qual[name] = df["quality"]
 
         self._qctool.add_data(data, qual)
+
+    def run_on_columns(self, columns: list[str]) -> None:
+        """Execute the QC function once per column (for auto-discovered streams).
+
+        Used when tests have no configured streams and fields were auto-discovered
+        from the triggering thing's STA datastreams.
+        """
+        for col in columns:
+            self._qctool.execute(self.func_name, field=col, **self.params)
+        self.result = QcResult()
+        self.result.data = self._qctool.get_data()
+        self.result.quality = self._qctool.get_quality()
+        self.result.columns = pd.Index(self.result.quality.keys())
+        self.result.origin = repr(self)
 
     def run(self) -> None:
         logging.debug(

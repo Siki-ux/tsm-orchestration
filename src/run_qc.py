@@ -135,9 +135,26 @@ class QcHandler(AbstractHandler):
                 logger.info("Test %s of %s: %s", i, N, test)
                 try:
                     stage = "Loading data for"
-                    test.load_data(sm, start_date, end_date)
+                    auto_streams = []
+                    if not test.streams and thing:
+                        auto_streams = sm.discover_thing_streams(thing.uuid)
+                        if not auto_streams:
+                            logger.warning(
+                                "Test %s of %s (%s): no STA streams found for thing %s, skipping",
+                                i, N, test.name, thing.uuid,
+                            )
+                            if thing:
+                                journal.warning(
+                                    f"QC test '{test.name}' skipped: thing has no linked STA streams",
+                                    thing.uuid,
+                                )
+                            continue
+                    test.load_data(sm, start_date, end_date, streams=auto_streams or None)
                     stage = "Running QC function of"
-                    test.run()
+                    if auto_streams:
+                        test.run_on_columns([si.value for si in auto_streams])
+                    else:
+                        test.run()
                     stage = "Storing result of"
                     sm.update(test.result)
                 except Exception as e:

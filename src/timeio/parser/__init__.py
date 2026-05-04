@@ -61,8 +61,12 @@ def get_parser(
         norm_kws = settings.pop("pandas_json_normalize", {})
         instance = klass(settings, norm_kws)
 
+    elif issubclass(klass, MqttParser):
+        # Instantiate MQTT device parsers (e.g., ChirpStackGenericParser)
+        instance = klass()
+
     else:
-        # Fallback: Dynamic loading for MQTT devices
+        # Fallback: Dynamic loading for custom parsers
         # If settings contain script info, try to load dynamically
         if settings and settings.get("script_bucket") and settings.get("script_path"):
             try:

@@ -57,11 +57,13 @@ docker-compose exec -T database psql -U postgres -d postgres -c "\dt water_dp.*"
 
 Add these to your `.env` file:
 ```bash
-# water_dp-api settings
+# water_dp-api settings (used by docker-compose-water-dp.yml)
 WATER_DP_DEBUG=true
 WATER_DP_SECRET_KEY=your-secret-key-change-in-production
 WATER_DP_LOG_LEVEL=INFO
 WATER_DP_API_PORT=8000
+WATER_DP_GEOSERVER_PORT=8079
+WATER_DP_FRONTEND_PORT=3000
 ```
 
 ### 4. Start water_dp-api services
@@ -71,7 +73,13 @@ WATER_DP_API_PORT=8000
 docker-compose -f docker-compose.yml -f docker-compose-water-dp.yml up -d water-dp-redis water-dp-api water-dp-worker
 ```
 
-### 5. Verify integration
+### 5. Run database migrations
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose-water-dp.yml exec water-dp-api alembic upgrade head
+```
+
+### 6. Verify integration
 
 Check services are running:
 ```bash

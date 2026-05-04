@@ -422,14 +422,14 @@ class CreateThingInPostgresHandler(AbstractHandler):
             "VALUES (%s, %s, %s, %s) ON CONFLICT (uuid) DO UPDATE SET "
             "name = EXCLUDED.name, "
             "description = EXCLUDED.description, "
-            "properties = EXCLUDED.properties "
+            "properties = COALESCE(EXCLUDED.properties, thing.properties) "
             "RETURNING (xmax = 0)"
         )
         params = (
             thing.name,
             thing.uuid,
             thing.description,
-            json.dumps(thing.properties),
+            json.dumps(thing.properties) if thing.properties is not None else None,
         )
         with self.db.connection() as conn:
             with conn.cursor() as c:

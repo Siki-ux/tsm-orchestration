@@ -1,8 +1,0 @@
----
-
-terminal:
-  image: "docker:${DOCKER_IMAGE_TAG}"
-  before_script:
-    - "apk add --no-cache curl postgresql-client bash jq"
-  variables:
-    POSTGRES_SSLMODE: disable

@@ -40,13 +40,17 @@ RUN mkdir -p $CATALINA_HOME/conf/Catalina/localhost \
     && adduser --system --uid ${UID} --gid ${GID} --home /home/tomcat tomcat \
     || echo "The UID '${UID}' is already in use."
 
+ARG SKIP_SSL_VERIFY=false
+
 # Download the FROST-Server.war, postgis-jdbc.jar, and postgresql.jar files
 # Create the /share directory and set the owner to the UID user
-RUN mkdir -p $CATALINA_HOME/conf/Catalina/localhost \
+RUN WGET_OPTS=""; \
+    if [ "$SKIP_SSL_VERIFY" = "true" ]; then WGET_OPTS="--no-check-certificate"; fi; \
+    mkdir -p $CATALINA_HOME/conf/Catalina/localhost \
     && mkdir -p /share \
-    && wget --show-progress=off -O $CATALINA_HOME/lib/postgis-jdbc.jar $POSTGIS_JDBC_URL \
-    && wget --show-progress=off -O $CATALINA_HOME/lib/postgresql.jar $POSTGRESQL_URL \
-    && wget --show-progress=off -O /share/FROST-Server.war $FROST_URL \
+    && wget $WGET_OPTS --show-progress=off -O $CATALINA_HOME/lib/postgis-jdbc.jar $POSTGIS_JDBC_URL \
+    && wget $WGET_OPTS --show-progress=off -O $CATALINA_HOME/lib/postgresql.jar $POSTGRESQL_URL \
+    && wget $WGET_OPTS --show-progress=off -O /share/FROST-Server.war $FROST_URL \
     && chown -R ${UID}:${GID} $CATALINA_HOME \
     && chown -R ${UID}:${GID} /share
 

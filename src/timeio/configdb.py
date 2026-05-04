@@ -143,14 +143,18 @@ def fetch_device_type_id(conn: Connection, name: str) -> int:
 
 
 def fetch_extapi_type_id(conn: Connection, name: str) -> int:
-    """Returns the ID of an external api type, selected by its name."""
+    """Returns the ID of an external api type, selected by its name. Auto-creates if not found."""
     name = name.lower()
     r = conn.execute(
         "SELECT eat.id FROM config_db.ext_api_type eat WHERE eat.name = %s",
         [name],
     ).fetchone()
     if r is None:
-        raise ValueError(f"No entry for ext_api_type {name!r}")
+        logger.info(f"Ext API type '{name}' not found. Auto-creating.")
+        r = conn.execute(
+            "INSERT INTO config_db.ext_api_type (name) VALUES (%s) RETURNING id",
+            [name],
+        ).fetchone()
     return r[0]
 
 
@@ -532,6 +536,9 @@ def store_thing_config(conn: Connection, data: dict, qid: int | None, proj_id: i
 
     s3_id = None
     if s3 := data["raw_data_storage"]:
+        # Preserve existing file_parser_id if re-sync doesn't specify a new one
+        if parser_id is None:
+            parser_id = ids.get("file_parser_id")
         s3_id = upsert_table_s3_store(conn, s3, parser_id, ids["s3_store_id"])
 
     upsert_table_thing(

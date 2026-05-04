@@ -1,0 +1,62 @@
+services:
+  # Only services that bind-mount host directories and need
+  # host UID mapping get userns_mode: keep-id.
+  # Workers and keycloak are excluded — their images are large
+  # and userns_mode: keep-id causes storage-chown-by-maps errors.
+  flyway:
+    userns_mode: keep-id
+  mqtt-broker:
+    # rootless Podman: container uid 0 maps to host user, so the tmpfs at
+    # /var/lib/mosquitto/ is writable. The base compose sets user: "${UID}:${GID}"
+    # which makes the container run as a subuid, causing EACCES on the tmpfs.
+    user: "0:0"
+  object-storage:
+    # rootless Podman: MinIO SFTP listens on port 22; uid 1000 cannot bind
+    # privileged ports inside the container's network namespace.
+    # Container uid 0 → host uid 1000 in the user namespace.
+    user: "0:0"
+  proxy:
+    # rootless Podman: nginx must bind port 80; only uid 0 has CAP_NET_BIND_SERVICE
+    # inside the container's network namespace. Container uid 0 → host uid 1000
+    # in the user namespace, so bind-mounted host files are still accessible.
+    user: "0:0"
+    # Mount podman-specific locations with correct DNS resolver (10.89.0.1 vs Docker's 127.0.0.11)
+    volumes:
+      - ./nginx/locations.podman:/etc/nginx/locations:ro
+    # Connect to water_shared_net so nginx can resolve water-dp-* container hostnames
+    networks:
+      - default
+      - water_shared_net
+
+networks:
+  default: {}
+  water_shared_net:
+    external: true
+  visualization:
+    # No keep-id: podman initializes the volume _data dir as container UID 1000
+    # (= host subuid+999). Running as user 1000:1000 without keep-id means the
+    # container process owns the volume directory and Grafana can write to it.
+    user: "1000:1000"
+    # Grafana healthcheck: base file has the test command; override only tunes timing/retries
+    # (podman-compose concatenates list fields across overrides, so duplicating 'test' here
+    # would result in ["CMD-SHELL", "...", "CMD-SHELL", "..."] which is invalid)
+    healthcheck:
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+  frost:
+    userns_mode: keep-id
+  keycloak:
+    # start-dev + --import-realm takes 3-5 min; default 95s healthcheck window causes it to
+    # be marked unhealthy before it finishes, which blocks the proxy from starting.
+    healthcheck:
+      test: >
+        bash -c "
+          exec 3<>/dev/tcp/localhost/${KEYCLOAK_PORT} &&
+          echo -e 'GET /keycloak/health/ready HTTP/1.1\r\nHost: localhost\r\n\r\n' >&3
+        "
+      interval: 5s
+      timeout: 3s
+      retries: 120
+      start_period: 60s

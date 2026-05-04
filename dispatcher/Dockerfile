@@ -29,6 +29,8 @@ RUN apt-get -y update \
 
 FROM base AS build
 
+ARG SKIP_SSL_VERIFY=false
+
 RUN apt-get -y update \
     && apt-get -y --no-install-recommends install \
       git openssh-client \
@@ -36,13 +38,26 @@ RUN apt-get -y update \
       unzip
 
 # Install minio mc client
-RUN curl https://dl.min.io/client/mc/release/linux-amd64/mc > /usr/local/bin/mc \
+RUN if [ "$SKIP_SSL_VERIFY" = "true" ]; then \
+      curl --insecure https://dl.min.io/client/mc/release/linux-amd64/mc > /usr/local/bin/mc; \
+    else \
+      curl https://dl.min.io/client/mc/release/linux-amd64/mc > /usr/local/bin/mc; \
+    fi \
     && chmod a+x /usr/local/bin/mc
 
 # add requirements
 COPY src/requirements.txt /tmp/requirements.txt
 RUN python3 -m venv /opt/venv
-RUN /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
+RUN if [ "$SKIP_SSL_VERIFY" = "true" ]; then \
+      echo 'charset-normalizer!=3.4.7' > /tmp/constraints.txt && \
+      /opt/venv/bin/pip install --no-cache-dir \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+        --trusted-host codebase.helmholtz.cloud --trusted-host jfrog-pkg-proxy.it.att.com \
+        -c /tmp/constraints.txt \
+        -r /tmp/requirements.txt; \
+    else \
+      /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt; \
+    fi
 
 FROM base AS dist
 
