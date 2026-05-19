@@ -616,6 +616,75 @@ class NmApiSyncer(ExtApiSyncer):
         return {"observations": bodies}
 
 
+class BlueBeatleApiSyncer(ExtApiSyncer):
+    """Syncs data from the BlueBeatle IoT platform (https://api.data.bluebeatle.cz).
+
+    Required per-sensor settings (stored in ext_api.settings):
+        imsi     : IMSI identifier of the specific device (string)
+        username : BlueBeatle API username
+        password : BlueBeatle API password (encrypted at rest, plaintext on input)
+
+    The API endpoint returns data for ALL devices in one call; this syncer
+    fetches the full response and filters records for the configured IMSI.
+    Data is returned at 30-minute intervals.
+    """
+
+    BASE_URL = "https://api.data.bluebeatle.cz/data/v3/all"
+    _SKIP_FIELDS = frozenset({"Imsi", "Timestamp"})
+
+    def fetch_api_data(self, thing: Thing, content: MqttPayload.SyncExtApiT):
+        settings = thing.ext_api.settings
+        password = decrypt(settings["password"], get_crypt_key())
+
+        dt_from = datetime.strptime(content["datetime_from"], "%Y-%m-%d %H:%M:%S")
+        dt_to = datetime.strptime(content["datetime_to"], "%Y-%m-%d %H:%M:%S")
+
+        params = {
+            "from": dt_from.strftime("%Y-%m-%d"),
+            "to": dt_to.strftime("%Y-%m-%d"),
+        }
+
+        response = request_with_handling(
+            "GET",
+            self.BASE_URL,
+            params=params,
+            auth=(settings["username"], password),
+        )
+
+        imsi = str(settings["imsi"])
+        all_records = response.json()
+        device_records = [r for r in all_records if str(r.get("Imsi")) == imsi]
+
+        return {"records": device_records, "imsi": imsi}
+
+    def do_parse(self, api_response):
+        bodies = []
+        imsi = api_response["imsi"]
+        source = {"imsi": imsi}
+
+        for record in api_response["records"]:
+            timestamp = record.get("Timestamp")
+            if not timestamp:
+                continue
+            for field, value in record.items():
+                if field in self._SKIP_FIELDS or value is None:
+                    continue
+                try:
+                    bodies.append({
+                        "result_time": timestamp,
+                        "result_type": 0,
+                        "result_number": float(value),
+                        "datastream_pos": field,
+                        "parameters": json.dumps(
+                            {"origin": "bluebeatle_data", "column_header": source}
+                        ),
+                    })
+                except (TypeError, ValueError):
+                    pass
+
+        return {"observations": bodies}
+
+
 class CustomApiSyncer(ExtApiSyncer):
     """Dynamically loads and delegates to a user-uploaded syncer script."""
 
