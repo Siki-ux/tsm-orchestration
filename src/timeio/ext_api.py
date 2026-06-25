@@ -616,6 +616,125 @@ class NmApiSyncer(ExtApiSyncer):
         return {"observations": bodies}
 
 
+class BlueBeatleApiSyncer(ExtApiSyncer):
+    """Syncs data from the BlueBeatle IoT platform (https://api.data.bluebeatle.cz).
+
+    Auth: OAuth2 Client Credentials via https://auth.kdejemoje.cz/realms/bb-portal.
+    Each sensor maps to one BlueBeatle "place" (monitoring station).
+    Data is fetched per-place — no client-side filtering needed.
+    The API limits each request to a 25-hour window; sync_interval should be ≤ 24h.
+
+    Required per-sensor settings (stored in ext_api.settings):
+        place_id      : BlueBeatle place ID (integer)
+        client_id     : OAuth2 client ID (e.g. "czu")
+        client_secret : OAuth2 client secret (encrypted at rest, plaintext on input)
+    """
+
+    DATA_URL = "https://api.data.bluebeatle.cz/place/{place_id}/data/v3"
+    TOKEN_URL = "https://auth.kdejemoje.cz/realms/bb-portal/protocol/openid-connect/token"
+    _SKIP_FIELDS = frozenset({"Imsi", "Timestamp", "ReceivedTime"})
+
+    def _get_token(self, client_id: str, client_secret: str) -> str:
+        response = request_with_handling(
+            "POST",
+            self.TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+        )
+        return response.json()["access_token"]
+
+    def fetch_api_data(self, thing: Thing, content: MqttPayload.SyncExtApiT):
+        settings = thing.ext_api.settings
+        client_id = settings["client_id"]
+        # client_secret is normally encrypted at rest, but some sensors were
+        # provisioned with a plaintext secret — tolerate both.
+        raw_secret = settings["client_secret"]
+        try:
+            client_secret = decrypt(raw_secret, get_crypt_key())
+        except Exception:
+            client_secret = raw_secret
+
+        place_id = settings["place_id"]
+        dt_from = datetime.strptime(content["datetime_from"], "%Y-%m-%d %H:%M:%S")
+        dt_to = datetime.strptime(content["datetime_to"], "%Y-%m-%d %H:%M:%S")
+
+        # The API accepts date-only params and is capped at 25h per request, so we
+        # fetch one calendar day at a time as a half-open range [from, from+1day).
+        # This guarantees to > from (the API rejects from == to with HTTP 400).
+        # The OAuth token expires after 300s, so a wide backfill (many sequential
+        # daily calls) would outlive a single token — refresh it per chunk.
+        records = []
+        day = dt_from.date()
+        end_day = dt_to.date()
+        while day <= end_day:
+            next_day = day + timedelta(days=1)
+            token = self._get_token(client_id, client_secret)
+            resp = request_with_handling(
+                "GET",
+                self.DATA_URL.format(place_id=place_id),
+                params={
+                    "from": day.isoformat(),
+                    "to": next_day.isoformat(),
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            records.extend(resp.json())
+            day = next_day
+
+        return {"records": records, "place_id": place_id}
+
+    def do_parse(self, api_response):
+        bodies = []
+        source = {"place_id": api_response["place_id"]}
+
+        for record in api_response["records"]:
+            timestamp = record.get("Timestamp")
+            if not timestamp:
+                continue
+            for field, value in record.items():
+                if field in self._SKIP_FIELDS or value is None or value == "":
+                    continue
+                if isinstance(value, bool):
+                    body = {
+                        "result_time": timestamp,
+                        "result_type": 3,
+                        "result_boolean": value,
+                        "datastream_pos": field,
+                        "parameters": json.dumps(
+                            {"origin": "bluebeatle_data", "column_header": source}
+                        ),
+                    }
+                elif isinstance(value, str):
+                    body = {
+                        "result_time": timestamp,
+                        "result_type": 1,
+                        "result_string": value,
+                        "datastream_pos": field,
+                        "parameters": json.dumps(
+                            {"origin": "bluebeatle_data", "column_header": source}
+                        ),
+                    }
+                else:
+                    try:
+                        body = {
+                            "result_time": timestamp,
+                            "result_type": 0,
+                            "result_number": float(value),
+                            "datastream_pos": field,
+                            "parameters": json.dumps(
+                                {"origin": "bluebeatle_data", "column_header": source}
+                            ),
+                        }
+                    except (TypeError, ValueError):
+                        continue
+                bodies.append(body)
+
+        return {"observations": bodies}
+
+
 class CustomApiSyncer(ExtApiSyncer):
     """Dynamically loads and delegates to a user-uploaded syncer script."""
 

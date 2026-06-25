@@ -721,6 +721,34 @@ services:
         max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
 
 
+  worker-bluebeatle-bridge:
+    image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
+    build:
+      context: .
+      dockerfile: dispatcher/Dockerfile
+      args:
+        UID: "${UID}"
+        BASE_IMAGE_REGISTRY: "${DISPATCHER_DEBIAN_BASE_IMAGE_REGISTRY}"
+        BASE_IMAGE_TAG: "${DISPATCHER_DEBIAN_BASE_IMAGE_TAG}"
+    restart: "${SERVICE_WORKER_RESTART_POLICY}"
+    depends_on:
+      timeio-db-api:
+        condition: service_healthy
+    environment:
+      LOG_LEVEL: "${LOG_LEVEL}"
+      BB_CLIENT_ID: "${BB_CLIENT_ID}"
+      BB_CLIENT_SECRET: "${BB_CLIENT_SECRET}"
+      TOKEN_REFRESH_INTERVAL: "${BB_TOKEN_REFRESH_INTERVAL:-240}"
+      CONFIGDB_DSN: "${CONFIGDB_READONLY_DSN}"
+      DB_API_BASE_URL: "${DB_API_BASE_URL}"
+      DB_API_AUTH_TOKEN: "${DB_API_AUTH_TOKEN}"
+    entrypoint: ["./worker_launcher.sh", "python3", "run_bluebeatle_bridge.py"]
+    logging:
+      options:
+        max-size: "${DEFAULT_MAX_LOG_FILE_SIZE}"
+        max-file: "${DEFAULT_MAX_LOG_FILE_COUNT}"
+
+
   worker-sync-extsftp:
     image: "${TIMEIO_IMAGE_REGISTRY}/dispatcher:${TIMEIO_DISPATCHER_IMAGE_TAG}"
     build:

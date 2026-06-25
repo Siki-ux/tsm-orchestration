@@ -12,6 +12,7 @@ from timeio.feta import Thing
 from timeio.typehints import MqttPayload
 from timeio.journaling import Journal
 from timeio.ext_api import (
+    BlueBeatleApiSyncer,
     BoschApiSyncer,
     TsystemsApiSyncer,
     UbaApiSyncer,
@@ -49,6 +50,7 @@ class SyncExtApiManager(AbstractHandler):
             "dwd": DwdApiSyncer(),
             "ttn": TtnApiSyncer(),
             "nm": NmApiSyncer(),
+            "bluebeatle": BlueBeatleApiSyncer(),
         }
         self._custom_syncer_cache = {}
 
